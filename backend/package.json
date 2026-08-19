@@ -1,0 +1,31 @@
+{
+  "name": "bodega-pedernales-jej-backend",
+  "version": "1.0.0",
+  "description": "Control de Bodega Internacional de Proyecto (Pedernales) - JEJ Ingeniería - Backend",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "init-db": "node src/database/init.js",
+    "importar-excel": "node src/scripts/importarExcel.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^1.41.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.2.0",
+    "multer-storage-cloudinary": "^4.0.0",
+    "pdfkit": "^0.15.0",
+    "pg": "^8.13.1",
+    "qrcode": "^1.5.4",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  }
+}
