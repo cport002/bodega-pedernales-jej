@@ -53,16 +53,28 @@ app.use('/api/reportes', reportesRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', version: '1.0.0', timestamp: new Date().toISOString() }));
 
+// Aiven (plan gratis) apaga la base de datos por inactividad. Si el backend arranca justo en ese
+// momento, la primera conexión falla — sin reintento, el proceso se caía entero y quedaba abajo
+// (502/503 en Render) hasta el próximo deploy manual. Se reintenta con espera creciente.
 async function startServer() {
-  try {
-    await initDatabase();
-    app.listen(PORT, () => {
-      console.log(`Backend Bodega Pedernales JEJ corriendo en puerto ${PORT} — DB: PostgreSQL (Aiven)`);
-    });
-  } catch (e) {
-    console.error('Error al iniciar servidor:', e);
-    process.exit(1);
+  const maxIntentos = 6;
+  for (let intento = 1; intento <= maxIntentos; intento++) {
+    try {
+      await initDatabase();
+      break;
+    } catch (e) {
+      if (intento === maxIntentos) {
+        console.error(`No se pudo conectar a la base de datos tras ${maxIntentos} intentos:`, e.message);
+        process.exit(1);
+      }
+      const esperaMs = intento * 5000;
+      console.warn(`Intento ${intento}/${maxIntentos} de conexión a la BD falló (${e.message}). Reintentando en ${esperaMs / 1000}s...`);
+      await new Promise(r => setTimeout(r, esperaMs));
+    }
   }
+  app.listen(PORT, () => {
+    console.log(`Backend Bodega Pedernales JEJ corriendo en puerto ${PORT} — DB: PostgreSQL (Aiven)`);
+  });
 }
 startServer();
 
