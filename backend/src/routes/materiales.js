@@ -1,22 +1,75 @@
 const express = require('express');
+const XLSX = require('xlsx');
 const { sql } = require('../database/db');
 const { autenticar, autorizar } = require('../middleware/auth');
 
 const router = express.Router();
 
-// GET /api/materiales?busqueda=
+// SELECT base compartido por el listado y la exportación: agrega el stock total (suma de
+// v_lotes_stock de todos los lotes de ese material) y el estado ('activo' si tiene al menos un
+// lote activo, si no 'inactivo') ya que un material puede tener varios lotes.
+const SELECT_BASE = `
+  SELECT m.*,
+    COALESCE((SELECT SUM(s.stock_actual) FROM lotes l JOIN v_lotes_stock s ON s.lote_id = l.id WHERE l.material_id = m.id), 0) AS stock_total,
+    CASE WHEN EXISTS (SELECT 1 FROM lotes l WHERE l.material_id = m.id AND l.estado = 'activo') THEN 'activo' ELSE 'inactivo' END AS estado
+  FROM materiales m
+`;
+
+function construirFiltros(query) {
+  const { busqueda, especialidad, unidad, estado } = query;
+  const condiciones = [];
+  const params = [];
+  if (busqueda) {
+    condiciones.push('(m.descripcion LIKE ? OR m.especialidad LIKE ?)');
+    params.push(`%${busqueda.toUpperCase()}%`, `%${busqueda.toUpperCase()}%`);
+  }
+  if (especialidad) { condiciones.push('m.especialidad = ?'); params.push(especialidad.toUpperCase()); }
+  if (unidad) { condiciones.push('m.unidad = ?'); params.push(unidad.toUpperCase()); }
+  if (estado === 'activo') condiciones.push("EXISTS (SELECT 1 FROM lotes l WHERE l.material_id = m.id AND l.estado = 'activo')");
+  if (estado === 'inactivo') condiciones.push("NOT EXISTS (SELECT 1 FROM lotes l WHERE l.material_id = m.id AND l.estado = 'activo')");
+  return { where: condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '', params };
+}
+
+// GET /api/materiales?busqueda=&especialidad=&unidad=&estado=
 router.get('/', autenticar, async (req, res) => {
   try {
-    const { busqueda } = req.query;
-    let query = 'SELECT * FROM materiales';
-    const params = [];
-    if (busqueda) {
-      query += ' WHERE descripcion LIKE ? OR especialidad LIKE ?';
-      params.push(`%${busqueda.toUpperCase()}%`, `%${busqueda.toUpperCase()}%`);
-    }
-    query += ' ORDER BY descripcion LIMIT 500';
-    const r = await sql(query, params);
+    const { where, params } = construirFiltros(req.query);
+    const r = await sql(`${SELECT_BASE} ${where} ORDER BY m.descripcion LIMIT 1000`, params);
     res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/materiales/especialidades — valores distintos, para poblar el filtro
+router.get('/especialidades', autenticar, async (req, res) => {
+  try {
+    const r = await sql("SELECT DISTINCT especialidad FROM materiales WHERE especialidad IS NOT NULL AND especialidad <> '' ORDER BY especialidad");
+    res.json(r.rows.map(row => row.especialidad));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/materiales/exportar — mismos filtros que el listado, descarga un .xlsx
+router.get('/exportar', autenticar, async (req, res) => {
+  try {
+    const { where, params } = construirFiltros(req.query);
+    const r = await sql(`${SELECT_BASE} ${where} ORDER BY m.descripcion`, params);
+    const filas = r.rows.map(m => ({
+      Descripcion: m.descripcion,
+      Especialidad: m.especialidad || '',
+      'Diametro 1': m.diametro_1 || '',
+      'Diametro 2': m.diametro_2 || '',
+      Unidad: m.unidad,
+      'Stock Total': Number(m.stock_total) || 0,
+      'Peso Unit (kg)': m.peso_unidad_kg ?? '',
+      Estado: m.estado,
+    }));
+    const ws = XLSX.utils.json_to_sheet(filas);
+    ws['!cols'] = [{ wch: 55 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 10 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Materiales');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="materiales_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.send(buffer);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
