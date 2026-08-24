@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS lotes (
   ubicacion_2 TEXT,
   pallet_numero TEXT,
   equipo_destino TEXT,
-  estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo','agotado')),
+  estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo','agotado','inactivo')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -95,18 +95,33 @@ CREATE TABLE IF NOT EXISTS inventarios (
   fecha TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Migracion: agrega 'inactivo' al estado de lotes (materiales en bodega que no se usan en este
+-- contrato, se mantienen con su stock pero diferenciados). ALTER TABLE porque el CHECK de una
+-- tabla que ya existe no se actualiza solo con CREATE TABLE IF NOT EXISTS.
+ALTER TABLE lotes DROP CONSTRAINT IF EXISTS lotes_estado_check;
+ALTER TABLE lotes ADD CONSTRAINT lotes_estado_check CHECK(estado IN ('activo','agotado','inactivo'));
+
 CREATE INDEX IF NOT EXISTS idx_lotes_material ON lotes(material_id);
 CREATE INDEX IF NOT EXISTS idx_lotes_recepcion ON lotes(recepcion_id);
 CREATE INDEX IF NOT EXISTS idx_despachos_lote ON despachos(lote_id);
 CREATE INDEX IF NOT EXISTS idx_devoluciones_lote ON devoluciones(lote_id);
 CREATE INDEX IF NOT EXISTS idx_inventarios_lote ON inventarios(lote_id);
 
+-- El stock ya no se calcula siempre desde la recepcion original: si el lote tiene al menos una
+-- auditoria de inventario registrada, el conteo mas reciente pasa a ser la base ("verdad" fisica
+-- confirmada), y solo se le suman/restan los despachos/devoluciones ocurridos DESPUES de esa fecha.
+-- Si nunca se ha auditado, se mantiene el calculo original desde cantidad_recepcionada.
 CREATE OR REPLACE VIEW v_lotes_stock AS
 SELECT
   l.id AS lote_id,
-  l.cantidad_recepcionada
-    - COALESCE((SELECT SUM(d.cantidad) FROM despachos d WHERE d.lote_id = l.id), 0)
-    + COALESCE((SELECT SUM(dv.cantidad) FROM devoluciones dv WHERE dv.lote_id = l.id), 0)
+  COALESCE(
+    (SELECT i.cantidad_inventariada FROM inventarios i WHERE i.lote_id = l.id ORDER BY i.fecha DESC, i.id DESC LIMIT 1),
+    l.cantidad_recepcionada
+  )
+    - COALESCE((SELECT SUM(d.cantidad) FROM despachos d WHERE d.lote_id = l.id
+        AND d.fecha > COALESCE((SELECT i.fecha FROM inventarios i WHERE i.lote_id = l.id ORDER BY i.fecha DESC, i.id DESC LIMIT 1), '-infinity'::timestamptz)), 0)
+    + COALESCE((SELECT SUM(dv.cantidad) FROM devoluciones dv WHERE dv.lote_id = l.id
+        AND dv.fecha > COALESCE((SELECT i.fecha FROM inventarios i WHERE i.lote_id = l.id ORDER BY i.fecha DESC, i.id DESC LIMIT 1), '-infinity'::timestamptz)), 0)
     AS stock_actual,
   COALESCE((SELECT SUM(d.cantidad) FROM despachos d WHERE d.lote_id = l.id), 0) AS total_despachado,
   COALESCE((SELECT SUM(dv.cantidad) FROM devoluciones dv WHERE dv.lote_id = l.id), 0) AS total_devuelto
