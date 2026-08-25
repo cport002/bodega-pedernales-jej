@@ -10,18 +10,20 @@ const router = express.Router();
 router.get('/resumen', autenticar, async (req, res) => {
   try {
     const totalMateriales = (await sql('SELECT COUNT(*) AS total FROM materiales')).rows[0].total;
-    const materialesActivos = (await sql(
-      "SELECT COUNT(*) AS total FROM materiales m WHERE EXISTS (SELECT 1 FROM lotes l WHERE l.material_id = m.id AND l.estado = 'activo')"
-    )).rows[0].total;
-    const materialesInactivos = totalMateriales - materialesActivos;
+    // Activo/agotado/inactivo es un estado del LOTE (la unidad real de stock), no del material del
+    // catálogo — un mismo material puede tener varios lotes en distinto estado. "Inactivo" se marca
+    // a mano cuando el lote no se usa en este contrato (ver schema.sql), por eso el conteo tiene que
+    // ser de lotes: contar "materiales sin ningún lote activo" da un número distinto (y más chico)
+    // que confunde, porque no cuadra con la cantidad real de lotes marcados inactivos.
     const totalLotesActivos = (await sql("SELECT COUNT(*) AS total FROM lotes WHERE estado = 'activo'")).rows[0].total;
+    const totalLotesInactivos = (await sql("SELECT COUNT(*) AS total FROM lotes WHERE estado = 'inactivo'")).rows[0].total;
     const totalInventarios = (await sql('SELECT COUNT(*) AS total FROM inventario_sesiones')).rows[0].total;
     const totalDespachos = (await sql('SELECT COUNT(*) AS total FROM despachos')).rows[0].total;
     const totalDevoluciones = (await sql('SELECT COUNT(*) AS total FROM devoluciones')).rows[0].total;
     const ncrAbiertos = (await sql(
       "SELECT COUNT(*) AS total FROM lotes WHERE ncr_uso_d IS NOT NULL AND ncr_uso_d NOT IN ('0', 'N/A', '')"
     )).rows[0].total;
-    res.json({ totalMateriales, materialesActivos, materialesInactivos, totalLotesActivos, totalInventarios, totalDespachos, totalDevoluciones, ncrAbiertos });
+    res.json({ totalMateriales, totalLotesActivos, totalLotesInactivos, totalInventarios, totalDespachos, totalDevoluciones, ncrAbiertos });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

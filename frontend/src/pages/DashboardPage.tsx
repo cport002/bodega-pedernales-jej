@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import api, { fmt } from '../services/api'
 import type { ResumenReportes } from '../types'
 import PageHeader from '../components/ui/PageHeader'
-import { LayoutDashboard, Package, PackageCheck, PackageX, Boxes, PackageMinus, Undo2, AlertTriangle, ClipboardCheck } from 'lucide-react'
+import { LayoutDashboard, Package, Boxes, PackageX, PackageMinus, Undo2, AlertTriangle, ClipboardCheck } from 'lucide-react'
 
 export default function DashboardPage() {
   const [resumen, setResumen] = useState<ResumenReportes | null>(null)
@@ -14,9 +14,8 @@ export default function DashboardPage() {
 
   const tarjetas = [
     { to: '/materiales', icon: Package, label: 'Materiales en catálogo', valor: resumen?.totalMateriales, color: 'from-amber-600 to-orange-500' },
-    { to: '/materiales', icon: PackageCheck, label: 'Materiales activos', valor: resumen?.materialesActivos, color: 'from-emerald-700 to-emerald-500' },
-    { to: '/materiales', icon: PackageX, label: 'Materiales inactivos', valor: resumen?.materialesInactivos, color: 'from-gray-600 to-gray-400' },
     { to: '/lotes', icon: Boxes, label: 'Lotes activos', valor: resumen?.totalLotesActivos, color: 'from-slate-700 to-slate-500' },
+    { to: '/lotes', icon: PackageX, label: 'Lotes inactivos', valor: resumen?.totalLotesInactivos, color: 'from-gray-600 to-gray-400' },
     { to: '/inventarios', icon: ClipboardCheck, label: 'Inventarios registrados', valor: resumen?.totalInventarios, color: 'from-sky-700 to-sky-500' },
     { to: '/despachos', icon: PackageMinus, label: 'Despachos registrados', valor: resumen?.totalDespachos, color: 'from-orange-700 to-amber-600' },
     { to: '/devoluciones', icon: Undo2, label: 'Devoluciones registradas', valor: resumen?.totalDevoluciones, color: 'from-teal-700 to-teal-500' },

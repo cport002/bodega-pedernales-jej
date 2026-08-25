@@ -165,9 +165,8 @@ export interface InventarioSesion {
 
 export interface ResumenReportes {
   totalMateriales: number
-  materialesActivos: number
-  materialesInactivos: number
   totalLotesActivos: number
+  totalLotesInactivos: number
   totalInventarios: number
   totalDespachos: number
   totalDevoluciones: number
