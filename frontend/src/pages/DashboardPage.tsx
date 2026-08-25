@@ -18,8 +18,8 @@ export default function DashboardPage() {
   const totalMaterialesReales = Number(resumen?.totalLotesActivos ?? 0) + Number(resumen?.totalLotesInactivos ?? 0)
   const tarjetas = [
     { to: '/lotes', icon: Package, label: 'Materiales', valor: resumen ? totalMaterialesReales : undefined, color: 'from-amber-600 to-orange-500' },
-    { to: '/lotes', icon: Boxes, label: 'Materiales activos', valor: resumen?.totalLotesActivos, color: 'from-slate-700 to-slate-500' },
-    { to: '/lotes', icon: PackageX, label: 'Materiales inactivos', valor: resumen?.totalLotesInactivos, color: 'from-gray-600 to-gray-400' },
+    { to: '/lotes?estado=activo', icon: Boxes, label: 'Materiales activos', valor: resumen?.totalLotesActivos, color: 'from-slate-700 to-slate-500' },
+    { to: '/lotes?estado=inactivo', icon: PackageX, label: 'Materiales inactivos', valor: resumen?.totalLotesInactivos, color: 'from-gray-600 to-gray-400' },
     { to: '/inventarios', icon: ClipboardCheck, label: 'Inventarios registrados', valor: resumen?.totalInventarios, color: 'from-sky-700 to-sky-500' },
     { to: '/despachos', icon: PackageMinus, label: 'Despachos registrados', valor: resumen?.totalDespachos, color: 'from-orange-700 to-amber-600' },
     { to: '/devoluciones', icon: Undo2, label: 'Devoluciones registradas', valor: resumen?.totalDevoluciones, color: 'from-teal-700 to-teal-500' },

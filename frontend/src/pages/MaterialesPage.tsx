@@ -3,7 +3,7 @@ import api from '../services/api'
 import type { Material } from '../types'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
-import { Plus, Edit2, Package, Search, Download } from 'lucide-react'
+import { Plus, Edit2, Package, Download } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 
 const FORM_VACIO = { descripcion: '', especialidad: '', diametro_1: '', diametro_2: '', unidad: 'C/U', peso_unidad_kg: '' }
@@ -18,7 +18,6 @@ export default function MaterialesPage() {
   const [exportando, setExportando] = useState(false)
   const [busqueda, setBusqueda] = useState('')
   const [filtroEspecialidad, setFiltroEspecialidad] = useState('')
-  const [filtroEstado, setFiltroEstado] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editando, setEditando] = useState<Material | null>(null)
   const [form, setForm] = useState(FORM_VACIO)
@@ -27,7 +26,6 @@ export default function MaterialesPage() {
     const params: Record<string, string> = {}
     if (busqueda) params.busqueda = busqueda
     if (filtroEspecialidad) params.especialidad = filtroEspecialidad
-    if (filtroEstado) params.estado = filtroEstado
     return params
   }
 
@@ -55,8 +53,12 @@ export default function MaterialesPage() {
     }
   }
 
-  useEffect(() => { cargar() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { cargar() }, [filtroEspecialidad, filtroEstado]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { cargar() }, [filtroEspecialidad]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Búsqueda en vivo: filtra apenas el usuario deja de escribir, sin necesidad del botón Buscar
+  useEffect(() => {
+    const t = setTimeout(() => cargar(), 350)
+    return () => clearTimeout(t)
+  }, [busqueda]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { api.get('/materiales/especialidades').then(r => setEspecialidades(r.data)).catch(() => {}) }, [])
 
   const abrirNuevo = () => { setEditando(null); setForm(FORM_VACIO); setShowForm(true) }
@@ -107,7 +109,7 @@ export default function MaterialesPage() {
         }
       />
 
-      <form onSubmit={e => { e.preventDefault(); cargar() }} className="card flex flex-wrap items-end gap-4">
+      <form onSubmit={e => e.preventDefault()} className="card flex flex-wrap items-end gap-4">
         <div className="flex-1 min-w-[240px]">
           <label className="label">Buscar por descripción o especialidad</label>
           <input className="input" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="BRIDA SLIP-ON, PIPING..." />
@@ -119,15 +121,6 @@ export default function MaterialesPage() {
             {especialidades.map(esp => <option key={esp} value={esp}>{esp}</option>)}
           </select>
         </div>
-        <div className="min-w-[160px]">
-          <label className="label">Estado</label>
-          <select className="input" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}>
-            <option value="">Todos</option>
-            <option value="activo">Activo</option>
-            <option value="inactivo">Inactivo</option>
-          </select>
-        </div>
-        <button type="submit" className="btn-primary flex items-center gap-2"><Search className="w-4 h-4" /> Buscar</button>
       </form>
 
       {loading ? (
@@ -144,7 +137,6 @@ export default function MaterialesPage() {
                 <th className="table-header">Unidad</th>
                 <th className="table-header text-right">Cantidad</th>
                 <th className="table-header text-right">Peso unit. (kg)</th>
-                <th className="table-header text-center">Estado</th>
                 {puedeOperar && <th className="table-header text-center">Acciones</th>}
               </tr>
             </thead>
@@ -158,11 +150,6 @@ export default function MaterialesPage() {
                   <td className="table-cell">{m.unidad}</td>
                   <td className="table-cell text-right tabular-nums font-semibold">{m.stock_total}</td>
                   <td className="table-cell text-right tabular-nums">{m.peso_unidad_kg ?? '-'}</td>
-                  <td className="table-cell text-center">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${m.estado === 'activo' ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'}`}>
-                      {m.estado === 'activo' ? 'Activo' : 'Inactivo'}
-                    </span>
-                  </td>
                   {puedeOperar && (
                     <td className="table-cell text-center">
                       <button onClick={() => abrirEditar(m)} className="text-gray-400 hover:text-primary-600 transition-colors">
@@ -173,7 +160,7 @@ export default function MaterialesPage() {
                 </tr>
               ))}
               {materiales.length === 0 && (
-                <tr><td colSpan={9} className="table-cell text-center text-gray-400 py-8">Sin materiales para mostrar</td></tr>
+                <tr><td colSpan={8} className="table-cell text-center text-gray-400 py-8">Sin materiales para mostrar</td></tr>
               )}
             </tbody>
           </table>

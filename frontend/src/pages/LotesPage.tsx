@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import api, { fmt } from '../services/api'
 import type { Lote } from '../types'
 import toast from 'react-hot-toast'
@@ -9,19 +9,40 @@ import EscanearQrModal from '../components/EscanearQrModal'
 
 export default function LotesPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [lotes, setLotes] = useState<Lote[]>([])
   const [loading, setLoading] = useState(true)
   const [busqueda, setBusqueda] = useState('')
-  const [soloConStock, setSoloConStock] = useState(true)
+  const [soloConStock, setSoloConStock] = useState(searchParams.get('estado') ? false : true)
+  const [filtroEstado, setFiltroEstado] = useState(searchParams.get('estado') || '')
   const [escaneando, setEscaneando] = useState(false)
 
   const cargar = () => {
     setLoading(true)
-    api.get('/lotes', { params: { busqueda: busqueda || undefined, con_stock: soloConStock ? '1' : undefined } })
-      .then(r => { setLotes(r.data); setLoading(false) }).catch(() => setLoading(false))
+    api.get('/lotes', {
+      params: {
+        busqueda: busqueda || undefined,
+        con_stock: soloConStock ? '1' : undefined,
+        estado: filtroEstado || undefined,
+      }
+    }).then(r => { setLotes(r.data); setLoading(false) }).catch(() => setLoading(false))
   }
 
-  useEffect(() => { cargar() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Carga inicial (respeta ?estado= si se llegó desde un link del Dashboard) y cada vez que cambian
+  // los filtros de selección (estado, con stock). La búsqueda de texto se maneja aparte, con debounce.
+  useEffect(() => { cargar() }, [filtroEstado, soloConStock]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Búsqueda en vivo: filtra solo mientras el usuario deja de escribir (evita una consulta por tecla)
+  useEffect(() => {
+    const t = setTimeout(() => cargar(), 350)
+    return () => clearTimeout(t)
+  }, [busqueda]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams)
+    if (filtroEstado) next.set('estado', filtroEstado); else next.delete('estado')
+    setSearchParams(next, { replace: true })
+  }, [filtroEstado]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const buscarPorCodigo = async (codigo: string) => {
     try {
@@ -37,9 +58,13 @@ export default function LotesPage() {
     buscarPorCodigo(codigo)
   }
 
+  const subtitulo = filtroEstado
+    ? `${lotes.length} lote(s) ${filtroEstado === 'activo' ? 'activos' : filtroEstado === 'inactivo' ? 'inactivos' : filtroEstado}`
+    : 'Escanea el QR del pallet o busca por código, TAG o descripción'
+
   return (
     <div className="space-y-6">
-      <PageHeader title="Buscar Lote / Stock" subtitle="Escanea el QR del pallet o busca por código, TAG o descripción" icon={Search}
+      <PageHeader title="Buscar Lote / Stock" subtitle={subtitulo} icon={Search}
         actions={
           <button onClick={() => setEscaneando(true)} className="inline-flex items-center gap-2 bg-white text-amber-700 font-semibold text-sm px-4 py-2 rounded-xl hover:bg-amber-50 transition-colors shadow-sm">
             <ScanLine className="w-4 h-4" /> Escanear QR
@@ -47,16 +72,24 @@ export default function LotesPage() {
         }
       />
 
-      <form onSubmit={e => { e.preventDefault(); cargar() }} className="card flex flex-wrap items-end gap-4">
+      <form onSubmit={e => e.preventDefault()} className="card flex flex-wrap items-end gap-4">
         <div className="flex-1 min-w-[240px]">
           <label className="label">Código de lote, TAG, pallet o descripción</label>
           <input className="input" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="PED-000123, BULTO 19, BRIDA..." autoFocus />
+        </div>
+        <div className="min-w-[160px]">
+          <label className="label">Estado</label>
+          <select className="input" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}>
+            <option value="">Todos</option>
+            <option value="activo">Activo</option>
+            <option value="inactivo">Inactivo</option>
+            <option value="agotado">Agotado</option>
+          </select>
         </div>
         <div className="flex items-center gap-2 pb-2">
           <input type="checkbox" id="conStock" checked={soloConStock} onChange={e => setSoloConStock(e.target.checked)} />
           <label htmlFor="conStock" className="text-sm text-gray-700">Solo con stock disponible</label>
         </div>
-        <button type="submit" className="btn-primary flex items-center gap-2"><Search className="w-4 h-4" /> Buscar</button>
       </form>
 
       {loading ? (

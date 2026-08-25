@@ -16,10 +16,10 @@ const SELECT_BASE = `
   JOIN v_lotes_stock s ON s.lote_id = l.id
 `;
 
-// GET /api/lotes?busqueda=&con_stock=1&area=
+// GET /api/lotes?busqueda=&con_stock=1&area=&estado=
 router.get('/', autenticar, async (req, res) => {
   try {
-    const { busqueda, con_stock, area } = req.query;
+    const { busqueda, con_stock, area, estado } = req.query;
     const condiciones = [];
     const params = [];
     if (busqueda) {
@@ -28,10 +28,11 @@ router.get('/', autenticar, async (req, res) => {
       params.push(like, like, like, like);
     }
     if (area) { condiciones.push('l.area = ?'); params.push(area.toUpperCase()); }
+    if (estado) { condiciones.push('l.estado = ?'); params.push(estado.toLowerCase()); }
     if (con_stock === '1') condiciones.push('s.stock_actual > 0');
 
     const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
-    const r = await sql(`${SELECT_BASE} ${where} ORDER BY l.id DESC LIMIT 500`, params);
+    const r = await sql(`${SELECT_BASE} ${where} ORDER BY l.id DESC LIMIT 1000`, params);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
