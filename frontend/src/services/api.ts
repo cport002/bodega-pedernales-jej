@@ -28,7 +28,14 @@ export default api
 
 export const fmt = {
   num: (n: number, dec = 0) => new Intl.NumberFormat('es-CL', { maximumFractionDigits: dec }).format(n || 0),
-  fecha: (s?: string) => s ? new Date(s).toLocaleDateString('es-CL') : '-',
+  // Columnas DATE (sin hora) llegan como 'YYYY-MM-DD' o, vía node-pg, como ISO con una hora
+  // espuria (medianoche en la zona del servidor). Se lee el calendario directo del string en vez
+  // de pasar por `new Date(...).toLocaleDateString()`, que reinterpreta esa hora en la zona del
+  // navegador y puede mostrar el día anterior (ej. Chile UTC-3/4 corriendo detrás de UTC).
+  fecha: (s?: string) => {
+    const m = s ? /^(\d{4})-(\d{2})-(\d{2})/.exec(s) : null
+    return m ? `${m[3]}-${m[2]}-${m[1]}` : '-'
+  },
   fechaHora: (s?: string) => s ? new Date(s).toLocaleString('es-CL') : '-',
 }
 
