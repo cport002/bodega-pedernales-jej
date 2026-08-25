@@ -138,6 +138,7 @@ export interface Devolucion {
 export interface Inventario {
   id: number
   lote_id: number
+  sesion_id?: number | null
   lote_codigo: string
   material_descripcion: string
   unidad: string
@@ -150,11 +151,25 @@ export interface Inventario {
   fecha: string
 }
 
+export interface InventarioSesion {
+  id: number
+  fecha: string
+  etiqueta?: string | null
+  observaciones?: string | null
+  usuario_nombre?: string | null
+  created_at: string
+  total_lotes: number
+  con_diferencia: number
+  items?: Inventario[]
+}
+
 export interface ResumenReportes {
+  totalMateriales: number
+  materialesActivos: number
+  materialesInactivos: number
   totalLotesActivos: number
-  stockTotal: number
+  totalInventarios: number
   totalDespachos: number
   totalDevoluciones: number
   ncrAbiertos: number
-  diferenciasRecientes: number
 }

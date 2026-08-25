@@ -4,20 +4,24 @@ const { autenticar } = require('../middleware/auth');
 
 const router = express.Router();
 
-// GET /api/reportes/resumen — KPIs del dashboard
+// GET /api/reportes/resumen — KPIs del dashboard. Todos son CONTEOS de entidades/eventos — nunca
+// una suma de stock_actual entre materiales (unidades distintas: metros, kg, C/U... esa suma no
+// representa nada real, no se debe mostrar).
 router.get('/resumen', autenticar, async (req, res) => {
   try {
+    const totalMateriales = (await sql('SELECT COUNT(*) AS total FROM materiales')).rows[0].total;
+    const materialesActivos = (await sql(
+      "SELECT COUNT(*) AS total FROM materiales m WHERE EXISTS (SELECT 1 FROM lotes l WHERE l.material_id = m.id AND l.estado = 'activo')"
+    )).rows[0].total;
+    const materialesInactivos = totalMateriales - materialesActivos;
     const totalLotesActivos = (await sql("SELECT COUNT(*) AS total FROM lotes WHERE estado = 'activo'")).rows[0].total;
-    const stockTotal = (await sql('SELECT COALESCE(SUM(stock_actual), 0) AS total FROM v_lotes_stock')).rows[0].total;
+    const totalInventarios = (await sql('SELECT COUNT(*) AS total FROM inventario_sesiones')).rows[0].total;
     const totalDespachos = (await sql('SELECT COUNT(*) AS total FROM despachos')).rows[0].total;
     const totalDevoluciones = (await sql('SELECT COUNT(*) AS total FROM devoluciones')).rows[0].total;
     const ncrAbiertos = (await sql(
       "SELECT COUNT(*) AS total FROM lotes WHERE ncr_uso_d IS NOT NULL AND ncr_uso_d NOT IN ('0', 'N/A', '')"
     )).rows[0].total;
-    const diferenciasRecientes = (await sql(
-      "SELECT COUNT(*) AS total FROM inventarios WHERE diferencia != 0 AND fecha >= NOW() - INTERVAL '30 days'"
-    )).rows[0].total;
-    res.json({ totalLotesActivos, stockTotal, totalDespachos, totalDevoluciones, ncrAbiertos, diferenciasRecientes });
+    res.json({ totalMateriales, materialesActivos, materialesInactivos, totalLotesActivos, totalInventarios, totalDespachos, totalDevoluciones, ncrAbiertos });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

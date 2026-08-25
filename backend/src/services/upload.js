@@ -27,4 +27,16 @@ function urlArchivo(file) {
   return file ? file.path : null;
 }
 
-module.exports = { upload, urlArchivo };
+// Para la plantilla de inventario: el archivo se procesa en memoria (no va a Cloudinary, es un
+// insumo transitorio para leer con la librería `xlsx`, no un adjunto que haya que conservar).
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const uploadExcel = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const esXlsx = file.mimetype === XLSX_MIME || file.originalname.toLowerCase().endsWith('.xlsx');
+    cb(esXlsx ? null : new Error('El archivo debe ser un Excel (.xlsx)'), esXlsx);
+  }
+});
+
+module.exports = { upload, urlArchivo, uploadExcel };

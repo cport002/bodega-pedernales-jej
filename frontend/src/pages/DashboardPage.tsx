@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import api, { fmt } from '../services/api'
 import type { ResumenReportes } from '../types'
 import PageHeader from '../components/ui/PageHeader'
-import { LayoutDashboard, Boxes, PackageMinus, Undo2, AlertTriangle, ClipboardCheck } from 'lucide-react'
+import { LayoutDashboard, Package, PackageCheck, PackageX, Boxes, PackageMinus, Undo2, AlertTriangle, ClipboardCheck } from 'lucide-react'
 
 export default function DashboardPage() {
   const [resumen, setResumen] = useState<ResumenReportes | null>(null)
@@ -13,19 +13,21 @@ export default function DashboardPage() {
   }, [])
 
   const tarjetas = [
-    { to: '/lotes', icon: Boxes, label: 'Stock total (unidades)', valor: resumen?.stockTotal, color: 'from-amber-600 to-orange-500' },
+    { to: '/materiales', icon: Package, label: 'Materiales en catálogo', valor: resumen?.totalMateriales, color: 'from-amber-600 to-orange-500' },
+    { to: '/materiales', icon: PackageCheck, label: 'Materiales activos', valor: resumen?.materialesActivos, color: 'from-emerald-700 to-emerald-500' },
+    { to: '/materiales', icon: PackageX, label: 'Materiales inactivos', valor: resumen?.materialesInactivos, color: 'from-gray-600 to-gray-400' },
     { to: '/lotes', icon: Boxes, label: 'Lotes activos', valor: resumen?.totalLotesActivos, color: 'from-slate-700 to-slate-500' },
+    { to: '/inventarios', icon: ClipboardCheck, label: 'Inventarios registrados', valor: resumen?.totalInventarios, color: 'from-sky-700 to-sky-500' },
     { to: '/despachos', icon: PackageMinus, label: 'Despachos registrados', valor: resumen?.totalDespachos, color: 'from-orange-700 to-amber-600' },
-    { to: '/devoluciones', icon: Undo2, label: 'Devoluciones registradas', valor: resumen?.totalDevoluciones, color: 'from-emerald-700 to-emerald-500' },
+    { to: '/devoluciones', icon: Undo2, label: 'Devoluciones registradas', valor: resumen?.totalDevoluciones, color: 'from-teal-700 to-teal-500' },
     { to: '/reportes/ncr', icon: AlertTriangle, label: 'NCR / Novedades abiertas', valor: resumen?.ncrAbiertos, color: 'from-red-700 to-red-500' },
-    { to: '/inventarios', icon: ClipboardCheck, label: 'Diferencias de inventario (30 días)', valor: resumen?.diferenciasRecientes, color: 'from-sky-700 to-sky-500' },
   ]
 
   return (
     <div className="space-y-6">
       <PageHeader title="Dashboard" subtitle="Bodega Internacional Pedernales — JEJ Ingeniería" icon={LayoutDashboard} />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {tarjetas.map(t => (
           <Link key={t.label} to={t.to} className="card hover:shadow-card-md transition-shadow">
             <div className="flex items-center gap-4">

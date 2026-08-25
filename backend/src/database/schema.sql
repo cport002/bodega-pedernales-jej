@@ -84,9 +84,23 @@ CREATE TABLE IF NOT EXISTS devoluciones (
   fecha TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Un "conteo físico" (ya sea un solo lote desde el detalle del lote, o una carga masiva por Excel)
+-- es una sesión con una fecha y un responsable. Cada lote contado en esa sesión es una fila en
+-- `inventarios` (abajo) apuntando a esta sesión vía sesion_id. Así el historial se agrupa por
+-- evento de conteo en vez de mostrar cientos de filas sueltas sin relación entre sí.
+CREATE TABLE IF NOT EXISTS inventario_sesiones (
+  id SERIAL PRIMARY KEY,
+  fecha DATE NOT NULL,
+  etiqueta TEXT,
+  observaciones TEXT,
+  usuario_id INTEGER REFERENCES usuarios(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS inventarios (
   id SERIAL PRIMARY KEY,
   lote_id INTEGER NOT NULL REFERENCES lotes(id),
+  sesion_id INTEGER REFERENCES inventario_sesiones(id),
   cantidad_inventariada NUMERIC NOT NULL,
   stock_esperado NUMERIC NOT NULL,
   diferencia NUMERIC NOT NULL,
@@ -94,6 +108,11 @@ CREATE TABLE IF NOT EXISTS inventarios (
   usuario_id INTEGER REFERENCES usuarios(id),
   fecha TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Migracion: agrega sesion_id a instalaciones que ya tenían la tabla `inventarios` creada antes
+-- de que existiera el concepto de sesión (CREATE TABLE IF NOT EXISTS no la habría agregado sola).
+ALTER TABLE inventarios ADD COLUMN IF NOT EXISTS sesion_id INTEGER REFERENCES inventario_sesiones(id);
+CREATE INDEX IF NOT EXISTS idx_inventarios_sesion ON inventarios(sesion_id);
 
 -- Migracion: agrega 'inactivo' al estado de lotes (materiales en bodega que no se usan en este
 -- contrato, se mantienen con su stock pero diferenciados). ALTER TABLE porque el CHECK de una

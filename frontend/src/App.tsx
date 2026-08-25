@@ -13,6 +13,7 @@ import LoteDetallePage from './pages/LoteDetallePage'
 import DespachosPage from './pages/DespachosPage'
 import DevolucionesPage from './pages/DevolucionesPage'
 import InventariosPage from './pages/InventariosPage'
+import InventarioSesionDetallePage from './pages/InventarioSesionDetallePage'
 import NcrPage from './pages/NcrPage'
 import UsuariosPage from './pages/UsuariosPage'
 
@@ -40,6 +41,7 @@ export default function App() {
           <Route path="despachos" element={<DespachosPage />} />
           <Route path="devoluciones" element={<DevolucionesPage />} />
           <Route path="inventarios" element={<InventariosPage />} />
+          <Route path="inventarios/:id" element={<InventarioSesionDetallePage />} />
           <Route path="reportes/ncr" element={<NcrPage />} />
           <Route path="usuarios" element={<UsuariosPage />} />
         </Route>
