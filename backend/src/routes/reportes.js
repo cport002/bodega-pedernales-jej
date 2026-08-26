@@ -23,7 +23,18 @@ router.get('/resumen', autenticar, async (req, res) => {
     const ncrAbiertos = (await sql(
       "SELECT COUNT(*) AS total FROM lotes WHERE ncr_uso_d IS NOT NULL AND ncr_uso_d NOT IN ('0', 'N/A', '')"
     )).rows[0].total;
-    res.json({ totalMateriales, totalLotesActivos, totalLotesInactivos, totalInventarios, totalDespachos, totalDevoluciones, ncrAbiertos });
+    // Materiales (lotes) con al menos un conteo físico registrado alguna vez, vs. los que nunca se
+    // han inventariado — mismo criterio que el badge de "Último inventario" en Lotes.
+    const totalLotesInventariados = (await sql(
+      'SELECT COUNT(*) AS total FROM lotes l WHERE EXISTS (SELECT 1 FROM inventarios i WHERE i.lote_id = l.id)'
+    )).rows[0].total;
+    const totalLotesNoInventariados = (await sql(
+      'SELECT COUNT(*) AS total FROM lotes l WHERE NOT EXISTS (SELECT 1 FROM inventarios i WHERE i.lote_id = l.id)'
+    )).rows[0].total;
+    res.json({
+      totalMateriales, totalLotesActivos, totalLotesInactivos, totalInventarios, totalDespachos, totalDevoluciones, ncrAbiertos,
+      totalLotesInventariados, totalLotesNoInventariados
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

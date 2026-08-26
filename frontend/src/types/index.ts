@@ -172,4 +172,6 @@ export interface ResumenReportes {
   totalDespachos: number
   totalDevoluciones: number
   ncrAbiertos: number
+  totalLotesInventariados: number
+  totalLotesNoInventariados: number
 }
