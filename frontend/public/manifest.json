@@ -1,0 +1,25 @@
+{
+  "name": "Bodega Internacional Pedernales",
+  "short_name": "Bodega Pedernales",
+  "description": "Control de bodega internacional de proyecto — JEJ Ingeniería",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#451a03",
+  "theme_color": "#78350f",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

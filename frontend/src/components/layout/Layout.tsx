@@ -1,8 +1,11 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Package, Users, Truck, Boxes, PackagePlus, PackageMinus, Undo2, ClipboardCheck, LogOut, Menu, X, Search, AlertTriangle } from 'lucide-react'
+import { LayoutDashboard, Package, Users, Truck, Boxes, PackagePlus, PackageMinus, Undo2, ClipboardCheck, LogOut, Menu, X, Search, AlertTriangle, Smartphone } from 'lucide-react'
 import { useState } from 'react'
 import type { Usuario } from '../../types'
 import toast from 'react-hot-toast'
+
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent)
+const isInStandaloneMode = () => ('standalone' in navigator && (navigator as any).standalone) || window.matchMedia('(display-mode: standalone)').matches
 
 interface Props {
   auth: {
@@ -16,6 +19,12 @@ interface Props {
 export default function Layout({ auth }: Props) {
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [showInstallModal, setShowInstallModal] = useState(false)
+
+  const handleInstall = () => {
+    if (isInStandaloneMode()) { toast('Ya está instalada como app'); return }
+    setShowInstallModal(true)
+  }
 
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true },
@@ -96,6 +105,14 @@ export default function Layout({ auth }: Props) {
               <p className="text-white/50 text-[11px]">{rolLabel[auth.usuario?.rol ?? 'visor']}</p>
             </div>
           </div>
+          {!isInStandaloneMode() && (
+            <button onClick={handleInstall}
+              className="w-full flex items-center gap-2.5 px-3 py-2 mb-1 text-white/60 hover:text-white
+                         hover:bg-white/10 rounded-lg text-sm font-medium transition-all duration-150">
+              <Smartphone size={15} className="flex-shrink-0" />
+              Instalar como App
+            </button>
+          )}
           <button onClick={handleLogout}
             className="w-full flex items-center gap-2.5 px-3 py-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg text-sm font-medium transition-all duration-150">
             <LogOut size={15} className="flex-shrink-0" />
@@ -103,6 +120,60 @@ export default function Layout({ auth }: Props) {
           </button>
         </div>
       </aside>
+
+      {/* Modal instrucciones instalación */}
+      {showInstallModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end justify-center p-4"
+          onClick={() => setShowInstallModal(false)}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+                style={{ background: 'linear-gradient(135deg, #92400e, #451a03)' }}>
+                <Smartphone size={20} className="text-white" />
+              </div>
+              <div>
+                <p className="font-bold text-gray-900">Instalar como App</p>
+                <p className="text-xs text-gray-500">{isIOS() ? 'Safari · 3 pasos' : '3 pasos'}</p>
+              </div>
+            </div>
+            {isIOS() ? (
+              <ol className="space-y-3 text-sm text-gray-700">
+                <li className="flex items-start gap-3">
+                  <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5">1</span>
+                  <span>Toca el botón <strong>Compartir</strong> <span className="text-lg">⎙</span> en la barra inferior de Safari</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5">2</span>
+                  <span>Desplázate y toca <strong>"Añadir a pantalla de inicio"</strong></span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5">3</span>
+                  <span>Toca <strong>Añadir</strong> — el ícono aparecerá en tu pantalla de inicio</span>
+                </li>
+              </ol>
+            ) : (
+              <ol className="space-y-3 text-sm text-gray-700">
+                <li className="flex items-start gap-3">
+                  <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5">1</span>
+                  <span>Abre el <strong>menú de tu navegador</strong> (⋮ o ☰, normalmente arriba a la derecha)</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5">2</span>
+                  <span>Busca la opción <strong>"Añadir a pantalla de inicio"</strong> o <strong>"Instalar app"</strong> (el nombre exacto varía según el navegador)</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5">3</span>
+                  <span>Confirma tocando <strong>Añadir</strong> o <strong>Instalar</strong> — el ícono aparecerá en tu pantalla de inicio</span>
+                </li>
+              </ol>
+            )}
+            <button onClick={() => setShowInstallModal(false)}
+              className="mt-5 w-full py-2.5 rounded-xl bg-amber-700 text-white font-semibold text-sm">
+              Entendido
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <div className="lg:hidden bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 shadow-sm">
@@ -113,6 +184,14 @@ export default function Layout({ auth }: Props) {
             <Truck className="w-6 h-6 text-primary-600" />
             <span className="font-bold text-gray-800 text-sm truncate">Bodega Pedernales</span>
           </div>
+          {!isInStandaloneMode() && (
+            <button onClick={handleInstall}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold
+                         text-primary-700 bg-primary-50 hover:bg-primary-100 transition-colors flex-shrink-0">
+              <Smartphone size={14} />
+              Instalar
+            </button>
+          )}
         </div>
 
         <main className="flex-1 overflow-auto bg-gray-100 p-6">
