@@ -103,6 +103,12 @@ export default function LoteDetallePage() {
             <div><p className="label mb-0.5">Recepcionado</p><p className="font-medium text-gray-800">{fmt.num(lote.cantidad_recepcionada)} {lote.unidad}</p></div>
             <div><p className="label mb-0.5">Stock actual</p><p className="font-bold text-primary-700 text-lg">{fmt.num(lote.stock_actual)} {lote.unidad}</p></div>
             <div><p className="label mb-0.5">Estado</p><span className={lote.estado === 'activo' ? 'badge-green' : 'badge-gray'}>{lote.estado}</span></div>
+            <div>
+              <p className="label mb-0.5">Último inventario</p>
+              {lote.ultima_fecha_inventario
+                ? <span className="badge-green">{fmt.fecha(lote.ultima_fecha_inventario)}</span>
+                : <span className="badge-red">No inventariado</span>}
+            </div>
             <div><p className="label mb-0.5">TAG</p><p className="font-medium text-gray-800">{lote.tag || '-'}</p></div>
             <div><p className="label mb-0.5">Área</p><p className="font-medium text-gray-800">{lote.area || '-'}</p></div>
             <div><p className="label mb-0.5">Ubicación</p><p className="font-medium text-gray-800">{[lote.ubicacion_1, lote.ubicacion_2].filter(Boolean).join(' / ') || '-'}</p></div>

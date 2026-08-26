@@ -85,6 +85,7 @@ export interface Lote {
   pallet_numero?: string | null
   equipo_destino?: string | null
   estado: 'activo' | 'agotado'
+  ultima_fecha_inventario?: string | null
   stock_actual: number
   total_despachado?: number
   total_devuelto?: number

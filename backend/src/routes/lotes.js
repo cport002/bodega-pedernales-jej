@@ -8,7 +8,8 @@ const router = express.Router();
 const SELECT_BASE = `
   SELECT l.*, m.descripcion, m.especialidad, m.diametro_1, m.diametro_2, m.unidad, m.peso_unidad_kg,
     r.orden_compra, r.contrato, r.n_guia, r.fecha_recepcion, p.nombre AS proveedor_nombre,
-    s.stock_actual, s.total_despachado, s.total_devuelto
+    s.stock_actual, s.total_despachado, s.total_devuelto,
+    (SELECT MAX(i.fecha) FROM inventarios i WHERE i.lote_id = l.id) AS ultima_fecha_inventario
   FROM lotes l
   JOIN materiales m ON m.id = l.material_id
   JOIN recepciones r ON r.id = l.recepcion_id
@@ -19,7 +20,7 @@ const SELECT_BASE = `
 // GET /api/lotes?busqueda=&con_stock=1&area=&estado=
 router.get('/', autenticar, async (req, res) => {
   try {
-    const { busqueda, con_stock, area, estado } = req.query;
+    const { busqueda, con_stock, area, estado, inventariado } = req.query;
     const condiciones = [];
     const params = [];
     if (busqueda) {
@@ -30,6 +31,8 @@ router.get('/', autenticar, async (req, res) => {
     if (area) { condiciones.push('l.area = ?'); params.push(area.toUpperCase()); }
     if (estado) { condiciones.push('l.estado = ?'); params.push(estado.toLowerCase()); }
     if (con_stock === '1') condiciones.push('s.stock_actual > 0');
+    if (inventariado === '1') condiciones.push('EXISTS (SELECT 1 FROM inventarios i WHERE i.lote_id = l.id)');
+    if (inventariado === '0') condiciones.push('NOT EXISTS (SELECT 1 FROM inventarios i WHERE i.lote_id = l.id)');
 
     const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
     const r = await sql(`${SELECT_BASE} ${where} ORDER BY l.id DESC LIMIT 1000`, params);

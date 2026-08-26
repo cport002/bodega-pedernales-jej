@@ -15,6 +15,7 @@ export default function LotesPage() {
   const [busqueda, setBusqueda] = useState('')
   const [soloConStock, setSoloConStock] = useState(searchParams.get('estado') ? false : true)
   const [filtroEstado, setFiltroEstado] = useState(searchParams.get('estado') || '')
+  const [filtroInventariado, setFiltroInventariado] = useState(searchParams.get('inventariado') || '')
   const [escaneando, setEscaneando] = useState(false)
 
   const cargar = () => {
@@ -24,13 +25,15 @@ export default function LotesPage() {
         busqueda: busqueda || undefined,
         con_stock: soloConStock ? '1' : undefined,
         estado: filtroEstado || undefined,
+        inventariado: filtroInventariado || undefined,
       }
     }).then(r => { setLotes(r.data); setLoading(false) }).catch(() => setLoading(false))
   }
 
   // Carga inicial (respeta ?estado= si se llegó desde un link del Dashboard) y cada vez que cambian
-  // los filtros de selección (estado, con stock). La búsqueda de texto se maneja aparte, con debounce.
-  useEffect(() => { cargar() }, [filtroEstado, soloConStock]) // eslint-disable-line react-hooks/exhaustive-deps
+  // los filtros de selección (estado, con stock, inventariado). La búsqueda de texto se maneja
+  // aparte, con debounce.
+  useEffect(() => { cargar() }, [filtroEstado, soloConStock, filtroInventariado]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Búsqueda en vivo: filtra solo mientras el usuario deja de escribir (evita una consulta por tecla)
   useEffect(() => {
@@ -41,8 +44,9 @@ export default function LotesPage() {
   useEffect(() => {
     const next = new URLSearchParams(searchParams)
     if (filtroEstado) next.set('estado', filtroEstado); else next.delete('estado')
+    if (filtroInventariado) next.set('inventariado', filtroInventariado); else next.delete('inventariado')
     setSearchParams(next, { replace: true })
-  }, [filtroEstado]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filtroEstado, filtroInventariado]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const buscarPorCodigo = async (codigo: string) => {
     try {
@@ -86,6 +90,14 @@ export default function LotesPage() {
             <option value="agotado">Agotado</option>
           </select>
         </div>
+        <div className="min-w-[180px]">
+          <label className="label">Inventario</label>
+          <select className="input" value={filtroInventariado} onChange={e => setFiltroInventariado(e.target.value)}>
+            <option value="">Todos</option>
+            <option value="1">Inventariado</option>
+            <option value="0">No inventariado</option>
+          </select>
+        </div>
         <div className="flex items-center gap-2 pb-2">
           <input type="checkbox" id="conStock" checked={soloConStock} onChange={e => setSoloConStock(e.target.checked)} />
           <label htmlFor="conStock" className="text-sm text-gray-700">Solo con stock disponible</label>
@@ -105,6 +117,7 @@ export default function LotesPage() {
                 <th className="table-header">Pallet</th>
                 <th className="table-header text-right">Stock actual</th>
                 <th className="table-header text-center">Estado</th>
+                <th className="table-header text-center">Inventario</th>
               </tr>
             </thead>
             <tbody>
@@ -116,10 +129,15 @@ export default function LotesPage() {
                   <td className="table-cell">{l.pallet_numero}</td>
                   <td className="table-cell text-right tabular-nums font-semibold">{fmt.num(l.stock_actual)} {l.unidad}</td>
                   <td className="table-cell text-center"><span className={l.estado === 'activo' ? 'badge-green' : 'badge-gray'}>{l.estado}</span></td>
+                  <td className="table-cell text-center">
+                    {l.ultima_fecha_inventario
+                      ? <span className="badge-green" title="Última fecha en que se contó físicamente">{fmt.fecha(l.ultima_fecha_inventario)}</span>
+                      : <span className="badge-red">No inventariado</span>}
+                  </td>
                 </tr>
               ))}
               {lotes.length === 0 && (
-                <tr><td colSpan={6} className="table-cell text-center text-gray-400 py-8">Sin lotes para mostrar</td></tr>
+                <tr><td colSpan={7} className="table-cell text-center text-gray-400 py-8">Sin lotes para mostrar</td></tr>
               )}
             </tbody>
           </table>
