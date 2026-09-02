@@ -1,7 +1,8 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Package, Users, Truck, Boxes, PackagePlus, PackageMinus, Undo2, ClipboardCheck, LogOut, Menu, X, Search, AlertTriangle, Smartphone } from 'lucide-react'
-import { useState } from 'react'
+import { LayoutDashboard, Package, Users, Truck, Boxes, PackagePlus, PackageMinus, Undo2, ClipboardCheck, ClipboardList, ShoppingCart, LogOut, Menu, X, Search, AlertTriangle, Smartphone } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import type { Usuario } from '../../types'
+import api from '../../services/api'
 import toast from 'react-hot-toast'
 
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent)
@@ -13,6 +14,7 @@ interface Props {
     logout: () => void
     puedeOperar: boolean
     esAdmin: boolean
+    esSolicitante: boolean
   }
 }
 
@@ -20,23 +22,42 @@ export default function Layout({ auth }: Props) {
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showInstallModal, setShowInstallModal] = useState(false)
+  const [pendientes, setPendientes] = useState(0)
 
   const handleInstall = () => {
     if (isInStandaloneMode()) { toast('Ya está instalada como app'); return }
     setShowInstallModal(true)
   }
 
-  const navItems = [
-    { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true },
-    { to: '/materiales', icon: Package, label: 'Materiales' },
-    { to: '/recepciones', icon: PackagePlus, label: 'Recepciones' },
-    { to: '/lotes', icon: Search, label: 'Buscar Lote / Stock' },
-    { to: '/despachos', icon: PackageMinus, label: 'Despachos' },
-    { to: '/devoluciones', icon: Undo2, label: 'Devoluciones' },
-    { to: '/inventarios', icon: ClipboardCheck, label: 'Inventario' },
-    { to: '/reportes/ncr', icon: AlertTriangle, label: 'NCR / Novedades' },
-    ...(auth.esAdmin ? [{ to: '/usuarios', icon: Users, label: 'Usuarios' }] : []),
-  ]
+  // Contador de solicitudes pendientes para admin/bodeguero — se revisa al entrar y cada 60s,
+  // sin correo (decisión del usuario), solo este badge dentro del sistema.
+  useEffect(() => {
+    if (!auth.puedeOperar) return
+    const cargarPendientes = () => api.get('/solicitudes/pendientes/count').then(r => setPendientes(r.data.total)).catch(() => {})
+    cargarPendientes()
+    const t = setInterval(cargarPendientes, 60000)
+    return () => clearInterval(t)
+  }, [auth.puedeOperar])
+
+  // El solicitante solo necesita pedir material y ver el estado de lo que ya pidió — no tiene
+  // acceso al resto del sistema (reforzado también en el backend, ver routes/*.js autorizar()).
+  const navItems = auth.esSolicitante
+    ? [
+        { to: '/solicitar', icon: ShoppingCart, label: 'Solicitar Material', exact: true },
+        { to: '/mis-solicitudes', icon: ClipboardList, label: 'Mis Solicitudes' },
+      ]
+    : [
+        { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true },
+        { to: '/materiales', icon: Package, label: 'Materiales' },
+        { to: '/recepciones', icon: PackagePlus, label: 'Recepciones' },
+        { to: '/lotes', icon: Search, label: 'Buscar Lote / Stock' },
+        { to: '/despachos', icon: PackageMinus, label: 'Despachos' },
+        { to: '/devoluciones', icon: Undo2, label: 'Devoluciones' },
+        { to: '/inventarios', icon: ClipboardCheck, label: 'Inventario' },
+        ...(auth.puedeOperar ? [{ to: '/solicitudes', icon: ClipboardList, label: 'Solicitudes', badge: pendientes }] : []),
+        { to: '/reportes/ncr', icon: AlertTriangle, label: 'NCR / Novedades' },
+        ...(auth.esAdmin ? [{ to: '/usuarios', icon: Users, label: 'Usuarios' }] : []),
+      ]
 
   const handleLogout = () => {
     auth.logout()

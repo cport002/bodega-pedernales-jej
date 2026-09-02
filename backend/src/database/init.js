@@ -25,7 +25,8 @@ async function initDatabase() {
       const seeds = [
         { nombre: 'Administrador Bodega', email: 'admin@bodegapedernales.local', password: 'Pedernales2026!', rol: 'admin' },
         { nombre: 'Bodeguero', email: 'bodeguero@bodegapedernales.local', password: 'Pedernales2026!', rol: 'bodeguero' },
-        { nombre: 'Visor', email: 'visor@bodegapedernales.local', password: 'Pedernales2026!', rol: 'visor' }
+        { nombre: 'Visor', email: 'visor@bodegapedernales.local', password: 'Pedernales2026!', rol: 'visor' },
+        { nombre: 'Solicitante Terreno', email: 'solicitante@bodegapedernales.local', password: 'Pedernales2026!', rol: 'solicitante' }
       ];
       for (const u of seeds) {
         const hash = bcrypt.hashSync(u.password, 12);

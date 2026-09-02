@@ -76,7 +76,7 @@ router.get('/exportar', autenticar, async (req, res) => {
 // GET /api/materiales/:id
 router.get('/:id', autenticar, async (req, res) => {
   try {
-    const material = (await sql('SELECT * FROM materiales WHERE id = ?', [req.params.id])).rows[0];
+    const material = (await sql(`${SELECT_BASE} WHERE m.id = ?`, [req.params.id])).rows[0];
     if (!material) return res.status(404).json({ error: 'Material no encontrado' });
     res.json(material);
   } catch (e) { res.status(500).json({ error: e.message }); }

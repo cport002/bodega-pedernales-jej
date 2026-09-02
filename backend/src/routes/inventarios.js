@@ -52,7 +52,7 @@ const SELECT_DETALLE = `
 `;
 
 // GET /api/inventarios/sesiones — historial agrupado por sesión de conteo, más reciente primero
-router.get('/sesiones', autenticar, async (req, res) => {
+router.get('/sesiones', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const r = await sql(`${SELECT_SESIONES} ${GROUP_SESIONES} ORDER BY s.fecha DESC, s.id DESC LIMIT 200`);
     res.json(r.rows);
@@ -60,7 +60,7 @@ router.get('/sesiones', autenticar, async (req, res) => {
 });
 
 // GET /api/inventarios/sesiones/:id — detalle de una sesión: cabecera + cada lote contado en ella
-router.get('/sesiones/:id', autenticar, async (req, res) => {
+router.get('/sesiones/:id', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const sesion = (await sql(`${SELECT_SESIONES} WHERE s.id = ? ${GROUP_SESIONES}`, [req.params.id])).rows[0];
     if (!sesion) return res.status(404).json({ error: 'Sesión de inventario no encontrada' });
@@ -70,7 +70,7 @@ router.get('/sesiones/:id', autenticar, async (req, res) => {
 });
 
 // GET /api/inventarios?lote_id= — historial de conteos de un lote puntual (usado desde su ficha)
-router.get('/', autenticar, async (req, res) => {
+router.get('/', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const { lote_id } = req.query;
     const where = lote_id ? 'WHERE i.lote_id = ?' : '';
@@ -114,7 +114,7 @@ router.post('/', autenticar, autorizar('admin', 'bodeguero'), async (req, res) =
 });
 
 // GET /api/inventarios/areas — valores distintos de área, para poblar el filtro de la plantilla
-router.get('/areas', autenticar, async (req, res) => {
+router.get('/areas', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const r = await sql("SELECT DISTINCT area FROM lotes WHERE area IS NOT NULL AND area <> '' AND area <> 'N/A' ORDER BY area");
     res.json(r.rows.map(row => row.area));
@@ -125,7 +125,7 @@ router.get('/areas', autenticar, async (req, res) => {
 // lotes que calzan el filtro, listos para llenar la columna "CANTIDAD INVENTARIADA" a mano y
 // volver a subirlos por POST /importar. Filtro opcional: permite generar plantillas parciales
 // (por área/patio/equipo) para conteos físicos por zona, en vez de forzar siempre el listado completo.
-router.get('/plantilla', autenticar, async (req, res) => {
+router.get('/plantilla', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const { where, params } = construirFiltrosPlantilla(req.query);
     const r = await sql(

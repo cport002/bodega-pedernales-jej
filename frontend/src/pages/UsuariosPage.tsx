@@ -7,7 +7,7 @@ import { Plus, Edit2, Trash2, Users } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 
 const FORM_VACIO = { nombre: '', email: '', password: '', rol: 'bodeguero' as Usuario['rol'], activo: true }
-const ROL_LABEL: Record<string, string> = { admin: 'Administrador', bodeguero: 'Bodeguero', visor: 'Visor' }
+const ROL_LABEL: Record<string, string> = { admin: 'Administrador', bodeguero: 'Bodeguero', visor: 'Visor', solicitante: 'Solicitante' }
 
 export default function UsuariosPage() {
   const { usuario: yo } = useAuth()
@@ -133,6 +133,7 @@ export default function UsuariosPage() {
                 <div>
                   <label className="label">Rol *</label>
                   <select className="input" value={form.rol} onChange={e => setForm({ ...form, rol: e.target.value as any })}>
+                    <option value="solicitante">Solicitante</option>
                     <option value="visor">Visor</option>
                     <option value="bodeguero">Bodeguero</option>
                     <option value="admin">Administrador</option>

@@ -15,6 +15,7 @@ const despachosRoutes = require('./routes/despachos');
 const devolucionesRoutes = require('./routes/devoluciones');
 const inventariosRoutes = require('./routes/inventarios');
 const reportesRoutes = require('./routes/reportes');
+const solicitudesRoutes = require('./routes/solicitudes');
 
 const app = express();
 const PORT = process.env.PORT || 3007;
@@ -50,6 +51,7 @@ app.use('/api/despachos', despachosRoutes);
 app.use('/api/devoluciones', devolucionesRoutes);
 app.use('/api/inventarios', inventariosRoutes);
 app.use('/api/reportes', reportesRoutes);
+app.use('/api/solicitudes', solicitudesRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', version: '1.0.0', timestamp: new Date().toISOString() }));
 

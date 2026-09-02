@@ -1,13 +1,13 @@
 const express = require('express');
 const { sql } = require('../database/db');
-const { autenticar } = require('../middleware/auth');
+const { autenticar, autorizar } = require('../middleware/auth');
 
 const router = express.Router();
 
 // GET /api/reportes/resumen — KPIs del dashboard. Todos son CONTEOS de entidades/eventos — nunca
 // una suma de stock_actual entre materiales (unidades distintas: metros, kg, C/U... esa suma no
 // representa nada real, no se debe mostrar).
-router.get('/resumen', autenticar, async (req, res) => {
+router.get('/resumen', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const totalMateriales = (await sql('SELECT COUNT(*) AS total FROM materiales')).rows[0].total;
     // Activo/agotado/inactivo es un estado del LOTE (la unidad real de stock), no del material del
@@ -39,7 +39,7 @@ router.get('/resumen', autenticar, async (req, res) => {
 });
 
 // GET /api/reportes/stock — stock actual por lote, con filtros
-router.get('/stock', autenticar, async (req, res) => {
+router.get('/stock', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const { area, especialidad } = req.query;
     const condiciones = ['s.stock_actual > 0'];
@@ -65,7 +65,7 @@ router.get('/stock', autenticar, async (req, res) => {
 });
 
 // GET /api/reportes/movimientos — histórico combinado de despachos/devoluciones
-router.get('/movimientos', autenticar, async (req, res) => {
+router.get('/movimientos', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const r = await sql(
       `SELECT 'despacho' AS tipo, d.id, d.lote_id, l.codigo AS lote_codigo, m.descripcion, d.cantidad,
@@ -84,7 +84,7 @@ router.get('/movimientos', autenticar, async (req, res) => {
 });
 
 // GET /api/reportes/ncr — lotes con no conformidad o protocolo de cambio abierto
-router.get('/ncr', autenticar, async (req, res) => {
+router.get('/ncr', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const r = await sql(
       `SELECT l.id, l.codigo, l.tag, l.ncr_uso_d, l.protocolo_cambio_ubicacion, m.descripcion, l.area, l.ubicacion_1

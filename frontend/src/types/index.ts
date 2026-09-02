@@ -2,7 +2,7 @@ export interface Usuario {
   id: number
   nombre: string
   email: string
-  rol: 'admin' | 'bodeguero' | 'visor'
+  rol: 'admin' | 'bodeguero' | 'visor' | 'solicitante'
   activo?: number
   created_at?: string
 }
@@ -20,6 +20,8 @@ export interface Material {
   diametro_2?: string | null
   unidad: string
   peso_unidad_kg?: number | null
+  stock_total?: number
+  estado?: 'activo' | 'inactivo'
 }
 
 export interface Proveedor {
@@ -162,6 +164,46 @@ export interface InventarioSesion {
   total_lotes: number
   con_diferencia: number
   items?: Inventario[]
+}
+
+export interface LoteDisponible {
+  id: number
+  codigo: string
+  ubicacion_1?: string | null
+  ubicacion_2?: string | null
+  pallet_numero?: string | null
+  stock_actual: number
+}
+
+export interface DespachoDeSolicitud {
+  id: number
+  lote_id: number
+  lote_codigo: string
+  cantidad: number
+  fecha: string
+}
+
+export interface Solicitud {
+  id: number
+  material_id: number
+  material_descripcion: string
+  especialidad?: string | null
+  unidad: string
+  cantidad_solicitada: number
+  cantidad_aprobada?: number | null
+  frente_destino?: string | null
+  observaciones?: string | null
+  estado: 'pendiente' | 'aprobada' | 'rechazada'
+  motivo_rechazo?: string | null
+  solicitante_id: number
+  solicitante_nombre?: string | null
+  revisado_por?: number | null
+  revisor_nombre?: string | null
+  fecha_solicitud: string
+  fecha_resolucion?: string | null
+  stock_disponible_actual?: number
+  lotes_disponibles?: LoteDisponible[]
+  despachos?: DespachoDeSolicitud[]
 }
 
 export interface ResumenReportes {

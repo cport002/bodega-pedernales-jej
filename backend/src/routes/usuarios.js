@@ -19,7 +19,7 @@ router.post('/', autenticar, autorizar('admin'), async (req, res) => {
   try {
     const { nombre, email, password, rol } = req.body;
     if (!nombre || !email || !password || !rol) return res.status(400).json({ error: 'Nombre, email, contraseña y rol son requeridos' });
-    if (!['admin', 'bodeguero', 'visor'].includes(rol)) return res.status(400).json({ error: 'Rol inválido' });
+    if (!['admin', 'bodeguero', 'visor', 'solicitante'].includes(rol)) return res.status(400).json({ error: 'Rol inválido' });
 
     const existe = (await sql('SELECT id FROM usuarios WHERE email = ?', [email.toLowerCase().trim()])).rows[0];
     if (existe) return res.status(409).json({ error: 'Ya existe un usuario con ese email' });

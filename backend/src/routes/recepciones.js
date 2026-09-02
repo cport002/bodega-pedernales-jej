@@ -39,7 +39,7 @@ const SELECT_LISTA = `
 `;
 
 // GET /api/recepciones
-router.get('/', autenticar, async (req, res) => {
+router.get('/', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const r = await sql(`${SELECT_LISTA} ORDER BY r.id DESC LIMIT 200`);
     res.json(r.rows);
@@ -47,7 +47,7 @@ router.get('/', autenticar, async (req, res) => {
 });
 
 // GET /api/recepciones/:id
-router.get('/:id', autenticar, async (req, res) => {
+router.get('/:id', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const recepcion = (await sql(`${SELECT_LISTA} WHERE r.id = ?`, [req.params.id])).rows[0];
     if (!recepcion) return res.status(404).json({ error: 'Recepción no encontrada' });

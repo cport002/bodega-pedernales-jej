@@ -3,6 +3,7 @@ const { sql, withTransaction } = require('../database/db');
 const { autenticar, autorizar } = require('../middleware/auth');
 const { upload, urlArchivo } = require('../services/upload');
 const { generarComprobantePDF } = require('../services/comprobantePdf');
+const { crearDespachoEnTransaccion } = require('../services/despachoService');
 
 const router = express.Router();
 
@@ -16,7 +17,7 @@ const SELECT_DETALLE = `
 `;
 
 // GET /api/despachos?lote_id=
-router.get('/', autenticar, async (req, res) => {
+router.get('/', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const { lote_id } = req.query;
     const condiciones = lote_id ? 'WHERE d.lote_id = ?' : '';
@@ -27,7 +28,7 @@ router.get('/', autenticar, async (req, res) => {
 });
 
 // GET /api/despachos/:id/pdf
-router.get('/:id/pdf', autenticar, async (req, res) => {
+router.get('/:id/pdf', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const despacho = (await sql(`${SELECT_DETALLE} WHERE d.id = ?`, [req.params.id])).rows[0];
     if (!despacho) return res.status(404).json({ error: 'Despacho no encontrado' });
@@ -49,30 +50,13 @@ router.post('/', autenticar, autorizar('admin', 'bodeguero'), upload.fields([
     const firmaFile = req.files?.firma?.[0];
     if (!firmaFile) return res.status(400).json({ error: 'La firma digital de quien retira es requerida' });
 
-    const lote = (await sql('SELECT id FROM lotes WHERE id = ?', [lote_id])).rows[0];
-    if (!lote) return res.status(404).json({ error: 'Lote no encontrado' });
-    const stock = (await sql('SELECT stock_actual FROM v_lotes_stock WHERE lote_id = ?', [lote_id])).rows[0];
-    if (cant > stock.stock_actual) {
-      return res.status(409).json({ error: `Stock insuficiente en este lote, disponible: ${stock.stock_actual}` });
-    }
-
-    const id = await withTransaction(async (tsql) => {
-      const r = await tsql(
-        `INSERT INTO despachos (lote_id, cantidad, frente_destino, retirado_por, observaciones, firma_url, foto_url, usuario_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-        [lote_id, cant, frente_destino || null, retirado_por || null, observaciones || null, urlArchivo(firmaFile), urlArchivo(req.files?.foto?.[0]), req.usuario.id]
-      );
-      const despachoId = r.rows[0].id;
-
-      const restante = (await tsql('SELECT stock_actual FROM v_lotes_stock WHERE lote_id = ?', [lote_id])).rows[0].stock_actual;
-      if (restante <= 0) {
-        await tsql("UPDATE lotes SET estado = 'agotado' WHERE id = ?", [lote_id]);
-      }
-      return despachoId;
-    });
+    const id = await withTransaction((tsql) => crearDespachoEnTransaccion(tsql, {
+      lote_id, cantidad: cant, frente_destino, retirado_por, observaciones,
+      firma_url: urlArchivo(firmaFile), foto_url: urlArchivo(req.files?.foto?.[0]), usuario_id: req.usuario.id
+    }));
 
     res.status(201).json({ id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
 module.exports = router;

@@ -16,6 +16,10 @@ import InventariosPage from './pages/InventariosPage'
 import InventarioSesionDetallePage from './pages/InventarioSesionDetallePage'
 import NcrPage from './pages/NcrPage'
 import UsuariosPage from './pages/UsuariosPage'
+import NuevaSolicitudPage from './pages/NuevaSolicitudPage'
+import MisSolicitudesPage from './pages/MisSolicitudesPage'
+import SolicitudesPage from './pages/SolicitudesPage'
+import SolicitudDetallePage from './pages/SolicitudDetallePage'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -31,7 +35,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={auth.token ? <Navigate to="/" replace /> : <LoginPage onLogin={auth.login} />} />
         <Route path="/" element={<PrivateRoute><Layout auth={auth} /></PrivateRoute>}>
-          <Route index element={<DashboardPage />} />
+          <Route index element={auth.esSolicitante ? <Navigate to="/solicitar" replace /> : <DashboardPage />} />
           <Route path="materiales" element={<MaterialesPage />} />
           <Route path="recepciones" element={<RecepcionesPage />} />
           <Route path="recepciones/nueva" element={<NuevaRecepcionPage />} />
@@ -44,6 +48,10 @@ export default function App() {
           <Route path="inventarios/:id" element={<InventarioSesionDetallePage />} />
           <Route path="reportes/ncr" element={<NcrPage />} />
           <Route path="usuarios" element={<UsuariosPage />} />
+          <Route path="solicitar" element={<NuevaSolicitudPage />} />
+          <Route path="mis-solicitudes" element={<MisSolicitudesPage />} />
+          <Route path="solicitudes" element={<SolicitudesPage />} />
+          <Route path="solicitudes/:id" element={<SolicitudDetallePage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

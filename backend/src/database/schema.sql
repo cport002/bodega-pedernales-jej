@@ -126,6 +126,40 @@ CREATE INDEX IF NOT EXISTS idx_despachos_lote ON despachos(lote_id);
 CREATE INDEX IF NOT EXISTS idx_devoluciones_lote ON devoluciones(lote_id);
 CREATE INDEX IF NOT EXISTS idx_inventarios_lote ON inventarios(lote_id);
 
+-- Migracion: nuevo rol 'solicitante' (personal de terreno sin acceso previo al sistema, solo ve
+-- stock agregado por material y crea solicitudes, no aprueba ni despacha). ALTER TABLE porque el
+-- CHECK de una tabla que ya existe no se actualiza solo con CREATE TABLE IF NOT EXISTS.
+ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS usuarios_rol_check;
+ALTER TABLE usuarios ADD CONSTRAINT usuarios_rol_check CHECK(rol IN ('admin','bodeguero','visor','solicitante'));
+
+-- Solicitudes: pedido de material GENERICO (no de un lote especifico) hecho por un solicitante de
+-- terreno. Queda 'pendiente' hasta que admin/bodeguero la revisa: puede ajustar la cantidad y recien
+-- al aprobar decide de que lote(s) sacarlo (ver despachos.solicitud_id abajo), o la rechaza con motivo.
+CREATE TABLE IF NOT EXISTS solicitudes (
+  id SERIAL PRIMARY KEY,
+  material_id INTEGER NOT NULL REFERENCES materiales(id),
+  cantidad_solicitada NUMERIC NOT NULL CHECK(cantidad_solicitada > 0),
+  cantidad_aprobada NUMERIC,
+  frente_destino TEXT,
+  observaciones TEXT,
+  estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente','aprobada','rechazada')),
+  motivo_rechazo TEXT,
+  solicitante_id INTEGER NOT NULL REFERENCES usuarios(id),
+  revisado_por INTEGER REFERENCES usuarios(id),
+  fecha_solicitud TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  fecha_resolucion TIMESTAMPTZ
+);
+
+-- Migracion: enlaza cada despacho con la solicitud que lo origino (NULL si es un despacho directo,
+-- como hoy). Una sola solicitud aprobada puede generar VARIOS despachos si el bodeguero reparte la
+-- cantidad entre distintos lotes/pallets del mismo material.
+ALTER TABLE despachos ADD COLUMN IF NOT EXISTS solicitud_id INTEGER REFERENCES solicitudes(id);
+
+CREATE INDEX IF NOT EXISTS idx_solicitudes_estado ON solicitudes(estado);
+CREATE INDEX IF NOT EXISTS idx_solicitudes_material ON solicitudes(material_id);
+CREATE INDEX IF NOT EXISTS idx_solicitudes_solicitante ON solicitudes(solicitante_id);
+CREATE INDEX IF NOT EXISTS idx_despachos_solicitud ON despachos(solicitud_id);
+
 -- El stock ya no se calcula siempre desde la recepcion original: si el lote tiene al menos una
 -- auditoria de inventario registrada, el conteo mas reciente pasa a ser la base ("verdad" fisica
 -- confirmada), y solo se le suman/restan los despachos/devoluciones ocurridos DESPUES de esa fecha.

@@ -16,7 +16,7 @@ const SELECT_DETALLE = `
 `;
 
 // GET /api/devoluciones?lote_id=
-router.get('/', autenticar, async (req, res) => {
+router.get('/', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const { lote_id } = req.query;
     const condiciones = lote_id ? 'WHERE d.lote_id = ?' : '';
@@ -27,7 +27,7 @@ router.get('/', autenticar, async (req, res) => {
 });
 
 // GET /api/devoluciones/:id/pdf
-router.get('/:id/pdf', autenticar, async (req, res) => {
+router.get('/:id/pdf', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const devolucion = (await sql(`${SELECT_DETALLE} WHERE d.id = ?`, [req.params.id])).rows[0];
     if (!devolucion) return res.status(404).json({ error: 'Devolución no encontrada' });

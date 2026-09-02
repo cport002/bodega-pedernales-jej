@@ -18,7 +18,7 @@ const SELECT_BASE = `
 `;
 
 // GET /api/lotes?busqueda=&con_stock=1&area=&estado=
-router.get('/', autenticar, async (req, res) => {
+router.get('/', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const { busqueda, con_stock, area, estado, inventariado } = req.query;
     const condiciones = [];
@@ -50,7 +50,7 @@ router.get('/codigo/:codigo', autenticar, async (req, res) => {
 });
 
 // GET /api/lotes/:id
-router.get('/:id', autenticar, async (req, res) => {
+router.get('/:id', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
     const lote = (await sql(`${SELECT_BASE} WHERE l.id = ?`, [req.params.id])).rows[0];
     if (!lote) return res.status(404).json({ error: 'Lote no encontrado' });
