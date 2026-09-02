@@ -23,6 +23,7 @@
     "pdfkit": "^0.15.0",
     "pg": "^8.13.1",
     "qrcode": "^1.5.4",
+    "web-push": "^3.6.7",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

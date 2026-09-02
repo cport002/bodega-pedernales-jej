@@ -1,4 +1,4 @@
-const CACHE = 'bodega-pedernales-v1';
+const CACHE = 'bodega-pedernales-v2';
 
 self.addEventListener('install', e => {
   self.skipWaiting();
@@ -26,5 +26,37 @@ self.addEventListener('fetch', e => {
         return res;
       })
       .catch(() => caches.match(e.request))
+  );
+});
+
+// Notificación push (nueva solicitud, o aprobación/rechazo de la propia) — el payload lo arma
+// services/notificaciones.js en el backend: { titulo, mensaje, url }.
+self.addEventListener('push', e => {
+  let data = { titulo: 'Bodega Pedernales', mensaje: '', url: '/' };
+  try { data = { ...data, ...e.data.json() }; } catch {}
+  e.waitUntil(
+    self.registration.showNotification(data.titulo, {
+      body: data.mensaje || '',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      data: { url: data.url || '/' },
+    })
+  );
+});
+
+// Al tocar la notificación: si ya hay una pestaña de la app abierta, la enfoca y navega ahí;
+// si no, abre una nueva. Evita acumular pestañas duplicadas.
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = e.notification.data?.url || '/';
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientsArr => {
+      const existente = clientsArr.find(c => 'focus' in c);
+      if (existente) {
+        existente.navigate(url);
+        return existente.focus();
+      }
+      return self.clients.openWindow(url);
+    })
   );
 });

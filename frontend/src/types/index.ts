@@ -7,6 +7,16 @@ export interface Usuario {
   created_at?: string
 }
 
+export interface Notificacion {
+  id: number
+  tipo: 'solicitud_nueva' | 'solicitud_aprobada' | 'solicitud_rechazada'
+  titulo: string
+  mensaje: string | null
+  solicitud_id: number | null
+  leida: number
+  fecha: string
+}
+
 export interface AuthState {
   usuario: Usuario | null
   token: string | null

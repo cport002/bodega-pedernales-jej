@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import type { Usuario } from '../../types'
 import api from '../../services/api'
 import toast from 'react-hot-toast'
+import NotificacionesBell from '../NotificacionesBell'
+import { activarNotificacionesPush } from '../../services/push'
 
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent)
 const isInStandaloneMode = () => ('standalone' in navigator && (navigator as any).standalone) || window.matchMedia('(display-mode: standalone)').matches
@@ -38,6 +40,12 @@ export default function Layout({ auth }: Props) {
     const t = setInterval(cargarPendientes, 60000)
     return () => clearInterval(t)
   }, [auth.puedeOperar])
+
+  // Se suscribe a push una sola vez por sesión iniciada — si el usuario ya rechazó el permiso
+  // antes, el navegador no vuelve a preguntar (esto simplemente no hace nada en ese caso).
+  useEffect(() => {
+    if (auth.usuario) activarNotificacionesPush()
+  }, [auth.usuario?.id])
 
   // El solicitante solo necesita pedir material y ver el estado de lo que ya pidió — no tiene
   // acceso al resto del sistema (reforzado también en el backend, ver routes/*.js autorizar()).
@@ -205,6 +213,7 @@ export default function Layout({ auth }: Props) {
             <Truck className="w-6 h-6 text-primary-600" />
             <span className="font-bold text-gray-800 text-sm truncate">Bodega Pedernales</span>
           </div>
+          <NotificacionesBell />
           {!isInStandaloneMode() && (
             <button onClick={handleInstall}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold
@@ -213,6 +222,10 @@ export default function Layout({ auth }: Props) {
               Instalar
             </button>
           )}
+        </div>
+
+        <div className="hidden lg:flex items-center justify-end bg-white border-b border-gray-200 px-6 py-2 shadow-sm">
+          <NotificacionesBell />
         </div>
 
         <main className="flex-1 overflow-auto bg-gray-100 p-6">

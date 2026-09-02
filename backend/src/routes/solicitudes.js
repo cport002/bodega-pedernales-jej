@@ -3,6 +3,7 @@ const { sql, withTransaction } = require('../database/db');
 const { autenticar, autorizar } = require('../middleware/auth');
 const { upload, urlArchivo } = require('../services/upload');
 const { crearDespachoEnTransaccion } = require('../services/despachoService');
+const { notificarNuevaSolicitud, notificarResolucionSolicitud } = require('../services/notificaciones');
 
 const router = express.Router();
 
@@ -78,13 +79,15 @@ router.post('/', autenticar, autorizar('admin', 'bodeguero', 'solicitante'), asy
     const { material_id, cantidad, frente_destino, observaciones } = req.body;
     const cant = Number(cantidad);
     if (!material_id || !cant || cant <= 0) return res.status(400).json({ error: 'Material y una cantidad mayor a cero son requeridos' });
-    const material = (await sql('SELECT id FROM materiales WHERE id = ?', [material_id])).rows[0];
+    const material = (await sql('SELECT id, descripcion FROM materiales WHERE id = ?', [material_id])).rows[0];
     if (!material) return res.status(404).json({ error: 'Material no encontrado' });
     const r = await sql(
       `INSERT INTO solicitudes (material_id, cantidad_solicitada, frente_destino, observaciones, solicitante_id)
        VALUES (?, ?, ?, ?, ?) RETURNING id`,
       [material_id, cant, frente_destino || null, observaciones || null, req.usuario.id]
     );
+    const solicitud = { id: r.rows[0].id, cantidad_solicitada: cant };
+    notificarNuevaSolicitud(solicitud, material.descripcion, req.usuario.nombre).catch(() => {});
     res.status(201).json({ id: r.rows[0].id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -99,6 +102,8 @@ router.put('/:id/rechazar', autenticar, autorizar('admin', 'bodeguero'), async (
       `UPDATE solicitudes SET estado = 'rechazada', motivo_rechazo = ?, revisado_por = ?, fecha_resolucion = NOW() WHERE id = ?`,
       [req.body.motivo || null, req.usuario.id, req.params.id]
     );
+    const material = (await sql('SELECT descripcion FROM materiales WHERE id = ?', [solicitud.material_id])).rows[0];
+    notificarResolucionSolicitud(solicitud, material?.descripcion || 'material', false, req.body.motivo).catch(() => {});
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -156,6 +161,8 @@ router.post('/:id/aprobar', autenticar, autorizar('admin', 'bodeguero'), upload.
       return ids;
     });
 
+    const material = (await sql('SELECT descripcion FROM materiales WHERE id = ?', [solicitud.material_id])).rows[0];
+    notificarResolucionSolicitud(solicitud, material?.descripcion || 'material', true).catch(() => {});
     res.json({ ok: true, despacho_ids: despachoIds });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });

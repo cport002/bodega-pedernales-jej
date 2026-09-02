@@ -160,6 +160,33 @@ CREATE INDEX IF NOT EXISTS idx_solicitudes_material ON solicitudes(material_id);
 CREATE INDEX IF NOT EXISTS idx_solicitudes_solicitante ON solicitudes(solicitante_id);
 CREATE INDEX IF NOT EXISTS idx_despachos_solicitud ON despachos(solicitud_id);
 
+-- Notificaciones internas (campanita) + suscripciones push del navegador — alternativa a correo,
+-- pedido explicito del usuario. Una notificacion es siempre para UN usuario puntual (no hay
+-- notificaciones "para todo el rol", se crea una fila por cada admin/bodeguero a notificar).
+CREATE TABLE IF NOT EXISTS notificaciones (
+  id SERIAL PRIMARY KEY,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+  tipo TEXT NOT NULL CHECK(tipo IN ('solicitud_nueva','solicitud_aprobada','solicitud_rechazada')),
+  titulo TEXT NOT NULL,
+  mensaje TEXT,
+  solicitud_id INTEGER REFERENCES solicitudes(id),
+  leida INTEGER NOT NULL DEFAULT 0,
+  fecha TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_notificaciones_usuario ON notificaciones(usuario_id, leida);
+
+-- Un usuario puede tener varias suscripciones (celular + notebook, o reinstalo la app) — por eso
+-- la clave unica es el endpoint (identifica el dispositivo/navegador), no el usuario.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id SERIAL PRIMARY KEY,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_usuario ON push_subscriptions(usuario_id);
+
 -- El stock ya no se calcula siempre desde la recepcion original: si el lote tiene al menos una
 -- auditoria de inventario registrada, el conteo mas reciente pasa a ser la base ("verdad" fisica
 -- confirmada), y solo se le suman/restan los despachos/devoluciones ocurridos DESPUES de esa fecha.
