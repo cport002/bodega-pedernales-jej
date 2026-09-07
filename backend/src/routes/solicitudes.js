@@ -228,6 +228,11 @@ router.post('/:id/entregar', autenticar, autorizar('admin', 'bodeguero'), upload
       return ids;
     });
 
+    // Ciclo cerrado: la campanita ya no necesita seguir mostrando el aviso de esta solicitud
+    // (ni la de "nueva solicitud" para el bodeguero, ni la de "aprobada" para el solicitante) —
+    // pedido explicito del usuario, la campanita es para lo que todavia requiere atencion.
+    await sql('DELETE FROM notificaciones WHERE solicitud_id = ?', [solicitud.id]);
+
     res.json({ ok: true, despacho_ids: despachoIds });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
