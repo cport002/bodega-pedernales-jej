@@ -193,6 +193,15 @@ export interface DespachoDeSolicitud {
   fecha: string
 }
 
+export interface LoteAprobado {
+  lote_id: number
+  cantidad: number
+  lote_codigo: string
+  ubicacion_1?: string | null
+  ubicacion_2?: string | null
+  pallet_numero?: string | null
+}
+
 export interface Solicitud {
   id: number
   material_id: number
@@ -203,7 +212,7 @@ export interface Solicitud {
   cantidad_aprobada?: number | null
   frente_destino?: string | null
   observaciones?: string | null
-  estado: 'pendiente' | 'aprobada' | 'rechazada'
+  estado: 'pendiente' | 'aprobada' | 'rechazada' | 'entregada'
   motivo_rechazo?: string | null
   solicitante_id: number
   solicitante_nombre?: string | null
@@ -211,8 +220,11 @@ export interface Solicitud {
   revisor_nombre?: string | null
   fecha_solicitud: string
   fecha_resolucion?: string | null
+  fecha_entrega?: string | null
+  folio?: string
   stock_disponible_actual?: number
   lotes_disponibles?: LoteDisponible[]
+  lotes_aprobados?: LoteAprobado[]
   despachos?: DespachoDeSolicitud[]
 }
 

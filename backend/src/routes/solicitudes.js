@@ -4,6 +4,8 @@ const { autenticar, autorizar } = require('../middleware/auth');
 const { upload, urlArchivo } = require('../services/upload');
 const { crearDespachoEnTransaccion } = require('../services/despachoService');
 const { notificarNuevaSolicitud, notificarResolucionSolicitud } = require('../services/notificaciones');
+const { generarFolioSolicitud } = require('../services/qr');
+const { generarValePDF } = require('../services/valePdf');
 
 const router = express.Router();
 
@@ -64,12 +66,19 @@ router.get('/:id', autenticar, autorizar('admin', 'bodeguero', 'solicitante'), a
        ORDER BY vs.stock_actual DESC`,
       [solicitud.material_id]
     )).rows;
+    const lotes_aprobados = (await sql(
+      `SELECT sla.lote_id, sla.cantidad, l.codigo AS lote_codigo, l.ubicacion_1, l.ubicacion_2, l.pallet_numero
+       FROM solicitud_lotes_aprobados sla JOIN lotes l ON l.id = sla.lote_id
+       WHERE sla.solicitud_id = ?`,
+      [req.params.id]
+    )).rows;
     const despachos = (await sql(
       `SELECT d.id, d.lote_id, l.codigo AS lote_codigo, d.cantidad, d.fecha
        FROM despachos d JOIN lotes l ON l.id = d.lote_id WHERE d.solicitud_id = ?`,
       [req.params.id]
     )).rows;
-    res.json({ ...solicitud, lotes_disponibles, despachos });
+    const folio = generarFolioSolicitud(solicitud.id);
+    res.json({ ...solicitud, folio, lotes_disponibles, lotes_aprobados, despachos });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -108,24 +117,17 @@ router.put('/:id/rechazar', autenticar, autorizar('admin', 'bodeguero'), async (
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/solicitudes/:id/aprobar — multipart: firma (requerida), foto (opcional),
-// asignaciones = JSON string '[{"lote_id":1,"cantidad":5}, ...]'. Crea un despacho por cada
-// asignacion (misma firma) dentro de una sola transaccion.
-router.post('/:id/aprobar', autenticar, autorizar('admin', 'bodeguero'), upload.fields([
-  { name: 'firma', maxCount: 1 },
-  { name: 'foto', maxCount: 1 }
-]), async (req, res) => {
+// POST /api/solicitudes/:id/aprobar — body JSON: asignaciones = [{lote_id, cantidad}, ...].
+// Solo decide DE DONDE va a salir el material y genera el vale (folio + QR) — no toca stock ni
+// pide firma/foto todavia, eso pasa recien al confirmar la entrega fisica (ver /:id/entregar).
+router.post('/:id/aprobar', autenticar, autorizar('admin', 'bodeguero'), async (req, res) => {
   try {
     const solicitud = (await sql('SELECT * FROM solicitudes WHERE id = ?', [req.params.id])).rows[0];
     if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' });
     if (solicitud.estado !== 'pendiente') return res.status(409).json({ error: 'La solicitud ya fue resuelta' });
 
-    let asignaciones;
-    try { asignaciones = JSON.parse(req.body.asignaciones || '[]'); } catch { return res.status(400).json({ error: 'asignaciones inválidas' }); }
+    const { asignaciones, frente_destino } = req.body;
     if (!Array.isArray(asignaciones) || asignaciones.length === 0) return res.status(400).json({ error: 'Debes elegir al menos un lote y cantidad' });
-
-    const firmaFile = req.files?.firma?.[0];
-    if (!firmaFile) return res.status(400).json({ error: 'La firma digital de quien retira es requerida' });
 
     const loteIds = asignaciones.map(a => Number(a.lote_id));
     const lotesValidos = (await sql(
@@ -136,33 +138,90 @@ router.post('/:id/aprobar', autenticar, autorizar('admin', 'bodeguero'), upload.
       return res.status(400).json({ error: 'Uno de los lotes elegidos no corresponde al material solicitado' });
     }
 
-    const { retirado_por, frente_destino, observaciones } = req.body;
-    const firma_url = urlArchivo(firmaFile);
-    const foto_url = urlArchivo(req.files?.foto?.[0]);
     let cantidadTotal = 0;
-
-    const despachoIds = await withTransaction(async (tsql) => {
-      const ids = [];
+    await withTransaction(async (tsql) => {
       for (const a of asignaciones) {
         const cant = Number(a.cantidad);
         if (!cant || cant <= 0) throw Object.assign(new Error('Cantidad inválida en una de las asignaciones'), { status: 400 });
         cantidadTotal += cant;
+        await tsql(
+          `INSERT INTO solicitud_lotes_aprobados (solicitud_id, lote_id, cantidad) VALUES (?, ?, ?)`,
+          [solicitud.id, Number(a.lote_id), cant]
+        );
+      }
+      await tsql(
+        `UPDATE solicitudes SET estado = 'aprobada', cantidad_aprobada = ?, revisado_por = ?, fecha_resolucion = NOW(),
+         frente_destino = COALESCE(?, frente_destino) WHERE id = ?`,
+        [cantidadTotal, req.usuario.id, frente_destino || null, solicitud.id]
+      );
+    });
+
+    const material = (await sql('SELECT descripcion FROM materiales WHERE id = ?', [solicitud.material_id])).rows[0];
+    const folio = generarFolioSolicitud(solicitud.id);
+    notificarResolucionSolicitud(solicitud, material?.descripcion || 'material', true, null, folio).catch(() => {});
+    res.json({ ok: true, folio });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// GET /api/solicitudes/:id/vale-pdf — vale imprimible con QR del folio, para llevar a bodega.
+router.get('/:id/vale-pdf', autenticar, autorizar('admin', 'bodeguero', 'solicitante'), async (req, res) => {
+  try {
+    const solicitud = (await sql(`${SELECT_DETALLE} WHERE s.id = ?`, [req.params.id])).rows[0];
+    if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' });
+    if (req.usuario.rol === 'solicitante' && solicitud.solicitante_id !== req.usuario.id) {
+      return res.status(403).json({ error: 'Sin permisos para ver esta solicitud' });
+    }
+    if (solicitud.estado === 'pendiente' || solicitud.estado === 'rechazada') {
+      return res.status(409).json({ error: 'Esta solicitud todavía no tiene un vale generado' });
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="vale_solicitud_${solicitud.id}.pdf"`);
+    await generarValePDF(solicitud, res);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/solicitudes/:id/entregar — multipart: firma + foto del material (ambas requeridas,
+// es la confirmacion real de que el material cambio de manos). Usa los lotes/cantidades ya
+// decididos al aprobar (solicitud_lotes_aprobados) para crear los despachos reales ahora —
+// aca SI se valida y resta el stock, en el momento real del retiro.
+router.post('/:id/entregar', autenticar, autorizar('admin', 'bodeguero'), upload.fields([
+  { name: 'firma', maxCount: 1 },
+  { name: 'foto', maxCount: 1 }
+]), async (req, res) => {
+  try {
+    const solicitud = (await sql('SELECT * FROM solicitudes WHERE id = ?', [req.params.id])).rows[0];
+    if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' });
+    if (solicitud.estado !== 'aprobada') return res.status(409).json({ error: 'Esta solicitud no tiene un vale pendiente de retiro' });
+
+    const firmaFile = req.files?.firma?.[0];
+    if (!firmaFile) return res.status(400).json({ error: 'La firma digital de quien retira es requerida' });
+    const fotoFile = req.files?.foto?.[0];
+    if (!fotoFile) return res.status(400).json({ error: 'La foto del material entregado es requerida' });
+
+    const asignaciones = (await sql(
+      'SELECT lote_id, cantidad FROM solicitud_lotes_aprobados WHERE solicitud_id = ?',
+      [solicitud.id]
+    )).rows;
+    if (asignaciones.length === 0) return res.status(409).json({ error: 'Esta solicitud no tiene lotes asignados' });
+
+    const { retirado_por, observaciones } = req.body;
+    const firma_url = urlArchivo(firmaFile);
+    const foto_url = urlArchivo(fotoFile);
+
+    const despachoIds = await withTransaction(async (tsql) => {
+      const ids = [];
+      for (const a of asignaciones) {
         ids.push(await crearDespachoEnTransaccion(tsql, {
-          lote_id: Number(a.lote_id), cantidad: cant,
-          frente_destino: frente_destino || solicitud.frente_destino,
+          lote_id: a.lote_id, cantidad: a.cantidad,
+          frente_destino: solicitud.frente_destino,
           retirado_por, observaciones, firma_url, foto_url,
           usuario_id: req.usuario.id, solicitud_id: solicitud.id
         }));
       }
-      await tsql(
-        `UPDATE solicitudes SET estado = 'aprobada', cantidad_aprobada = ?, revisado_por = ?, fecha_resolucion = NOW() WHERE id = ?`,
-        [cantidadTotal, req.usuario.id, solicitud.id]
-      );
+      await tsql(`UPDATE solicitudes SET estado = 'entregada', fecha_entrega = NOW() WHERE id = ?`, [solicitud.id]);
       return ids;
     });
 
-    const material = (await sql('SELECT descripcion FROM materiales WHERE id = ?', [solicitud.material_id])).rows[0];
-    notificarResolucionSolicitud(solicitud, material?.descripcion || 'material', true).catch(() => {});
     res.json({ ok: true, despacho_ids: despachoIds });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });

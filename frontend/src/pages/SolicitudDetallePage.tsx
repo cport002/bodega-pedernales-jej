@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import api, { fmt, dataURLtoBlob } from '../services/api'
+import api, { fmt, dataURLtoBlob, descargarBlob } from '../services/api'
 import type { Solicitud } from '../types'
 import type SignatureCanvas from 'react-signature-canvas'
 import toast from 'react-hot-toast'
-import { ClipboardList, FileText, X } from 'lucide-react'
+import { ClipboardList, FileText, X, Download, QrCode, Truck } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import FirmaCanvas from '../components/FirmaCanvas'
 import { useAuth } from '../hooks/useAuth'
 
-const ESTADO_BADGE: Record<string, string> = { pendiente: 'badge-amber', aprobada: 'badge-green', rechazada: 'badge-red' }
-const ESTADO_LABEL: Record<string, string> = { pendiente: 'Pendiente', aprobada: 'Aprobada', rechazada: 'Rechazada' }
+const ESTADO_BADGE: Record<string, string> = { pendiente: 'badge-amber', aprobada: 'badge-blue', entregada: 'badge-green', rechazada: 'badge-red' }
+const ESTADO_LABEL: Record<string, string> = { pendiente: 'Pendiente', aprobada: 'Vale emitido — pendiente de retiro', entregada: 'Entregada', rechazada: 'Rechazada' }
 
 type Asignacion = { checked: boolean; cantidad: string }
 
@@ -19,7 +19,8 @@ export default function SolicitudDetallePage() {
   const { puedeOperar } = useAuth()
   const [solicitud, setSolicitud] = useState<Solicitud | null>(null)
   const [asignaciones, setAsignaciones] = useState<Record<number, Asignacion>>({})
-  const [formAprobar, setFormAprobar] = useState({ retirado_por: '', frente_destino: '', observaciones: '' })
+  const [frenteDestino, setFrenteDestino] = useState('')
+  const [formEntrega, setFormEntrega] = useState({ retirado_por: '', observaciones: '' })
   const [guardando, setGuardando] = useState(false)
   const [showRechazar, setShowRechazar] = useState(false)
   const [motivoRechazo, setMotivoRechazo] = useState('')
@@ -30,7 +31,7 @@ export default function SolicitudDetallePage() {
   const cargar = () => {
     api.get(`/solicitudes/${id}`).then(r => {
       setSolicitud(r.data)
-      setFormAprobar(f => ({ ...f, frente_destino: r.data.frente_destino || '' }))
+      setFrenteDestino(f => f || r.data.frente_destino || '')
     })
   }
   useEffect(() => { cargar() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -48,18 +49,11 @@ export default function SolicitudDetallePage() {
       .filter(([, a]) => a.checked && Number(a.cantidad) > 0)
       .map(([loteId, a]) => ({ lote_id: Number(loteId), cantidad: Number(a.cantidad) }))
     if (elegidos.length === 0) { toast.error('Marca al menos un lote y una cantidad'); return }
-    if (!sigRef.current || sigRef.current.isEmpty()) { toast.error('La firma digital de quien retira es requerida'); return }
 
     setGuardando(true)
     try {
-      const form = new FormData()
-      form.append('asignaciones', JSON.stringify(elegidos))
-      Object.entries(formAprobar).forEach(([k, v]) => { if (v) form.append(k, v) })
-      const firmaBlob = dataURLtoBlob(sigRef.current.getTrimmedCanvas().toDataURL('image/png'))
-      form.append('firma', firmaBlob, 'firma.png')
-      if (fotoRef.current?.files?.[0]) form.append('foto', fotoRef.current.files[0])
-      await api.post(`/solicitudes/${id}/aprobar`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
-      toast.success('Solicitud aprobada y despacho generado')
+      const r = await api.post(`/solicitudes/${id}/aprobar`, { asignaciones: elegidos, frente_destino: frenteDestino || null })
+      toast.success(`Vale ${r.data.folio} generado — el solicitante ya puede descargarlo`)
       cargar()
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Error al aprobar la solicitud')
@@ -79,9 +73,38 @@ export default function SolicitudDetallePage() {
     } finally { setGuardando(false) }
   }
 
+  const handleEntregar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!sigRef.current || sigRef.current.isEmpty()) { toast.error('La firma digital de quien retira es requerida'); return }
+    if (!fotoRef.current?.files?.[0]) { toast.error('La foto del material entregado es requerida'); return }
+
+    setGuardando(true)
+    try {
+      const form = new FormData()
+      Object.entries(formEntrega).forEach(([k, v]) => { if (v) form.append(k, v) })
+      const firmaBlob = dataURLtoBlob(sigRef.current.getTrimmedCanvas().toDataURL('image/png'))
+      form.append('firma', firmaBlob, 'firma.png')
+      form.append('foto', fotoRef.current.files[0])
+      await api.post(`/solicitudes/${id}/entregar`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+      toast.success('Entrega confirmada')
+      cargar()
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Error al confirmar la entrega')
+    } finally { setGuardando(false) }
+  }
+
+  const descargarVale = async () => {
+    try {
+      const r = await api.get(`/solicitudes/${id}/vale-pdf`, { responseType: 'blob' })
+      descargarBlob(r.data, `vale_${solicitud?.folio || id}.pdf`)
+    } catch {
+      toast.error('No se pudo generar el vale')
+    }
+  }
+
   const verPdf = async (despachoId: number) => {
     const r = await api.get(`/despachos/${despachoId}/pdf`, { responseType: 'blob' })
-    window.open(URL.createObjectURL(r.data), '_blank')
+    descargarBlob(r.data, `despacho_${despachoId}.pdf`)
   }
 
   if (!solicitud) return <div className="flex items-center justify-center h-32 text-gray-500">Cargando...</div>
@@ -103,8 +126,14 @@ export default function SolicitudDetallePage() {
           <p className="label mb-0.5">Estado</p>
           <span className={ESTADO_BADGE[solicitud.estado]}>{ESTADO_LABEL[solicitud.estado]}</span>
         </div>
-        {solicitud.estado !== 'pendiente' && (
-          <div><p className="label mb-0.5">Resuelto por</p><p className="font-medium text-gray-800">{solicitud.revisor_nombre} · {fmt.fechaHora(solicitud.fecha_resolucion ?? undefined)}</p></div>
+        {solicitud.estado !== 'pendiente' && solicitud.folio && (
+          <div><p className="label mb-0.5">Folio del vale</p><p className="font-mono font-bold text-gray-800">{solicitud.folio}</p></div>
+        )}
+        {solicitud.estado !== 'pendiente' && solicitud.estado !== 'rechazada' && (
+          <div><p className="label mb-0.5">Aprobado por</p><p className="font-medium text-gray-800">{solicitud.revisor_nombre} · {fmt.fechaHora(solicitud.fecha_resolucion ?? undefined)}</p></div>
+        )}
+        {solicitud.estado === 'entregada' && (
+          <div><p className="label mb-0.5">Entregado</p><p className="font-medium text-gray-800">{fmt.fechaHora(solicitud.fecha_entrega ?? undefined)}</p></div>
         )}
         {solicitud.estado === 'rechazada' && solicitud.motivo_rechazo && (
           <div className="col-span-full"><p className="label mb-0.5">Motivo de rechazo</p><p className="font-medium text-red-700">{solicitud.motivo_rechazo}</p></div>
@@ -112,6 +141,25 @@ export default function SolicitudDetallePage() {
       </div>
 
       {solicitud.estado === 'aprobada' && (
+        <div className="card border-2 border-primary-100 bg-primary-50/40">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-primary-600 flex items-center justify-center flex-shrink-0">
+                <QrCode className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <p className="font-semibold text-gray-900">Vale de retiro generado</p>
+                <p className="text-xs text-gray-500">Folio <strong>{solicitud.folio}</strong> — llévalo (impreso o en el celular) a bodega para retirar el material</p>
+              </div>
+            </div>
+            <button onClick={descargarVale} className="btn-primary flex items-center gap-2 whitespace-nowrap">
+              <Download className="w-4 h-4" /> Descargar / Imprimir Vale
+            </button>
+          </div>
+        </div>
+      )}
+
+      {solicitud.estado === 'entregada' && (
         <div className="card p-0 overflow-hidden overflow-x-auto">
           <div className="p-4 border-b border-gray-100"><h3>Despachos generados</h3></div>
           <table className="w-full">
@@ -143,7 +191,7 @@ export default function SolicitudDetallePage() {
 
       {solicitud.estado === 'pendiente' && puedeOperar && (
         <form onSubmit={handleAprobar} className="card space-y-4">
-          <h3>Elegir lote(s) y cantidad para despachar</h3>
+          <h3>Elegir lote(s) y cantidad para el vale</h3>
           <div className="border border-gray-200 rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
@@ -178,23 +226,61 @@ export default function SolicitudDetallePage() {
             </table>
           </div>
           <p className="text-sm text-gray-500">Total a asignar: <strong>{fmt.num(totalAsignado)} {solicitud.unidad}</strong> (pedido: {fmt.num(solicitud.cantidad_solicitada)} {solicitud.unidad})</p>
+          <p className="text-xs text-gray-400">El stock recién se descuenta al confirmar la entrega física en bodega, no ahora.</p>
+
+          <div>
+            <label className="label">Frente / equipo destino</label>
+            <input className="input" value={frenteDestino} onChange={e => setFrenteDestino(e.target.value)} />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" className="btn-secondary" onClick={() => setShowRechazar(true)}>Rechazar</button>
+            <button type="submit" disabled={guardando} className="btn-primary">{guardando ? 'Guardando...' : 'Aprobar y Generar Vale'}</button>
+          </div>
+        </form>
+      )}
+
+      {solicitud.estado === 'aprobada' && puedeOperar && (
+        <form onSubmit={handleEntregar} className="card space-y-4">
+          <div className="flex items-center gap-2">
+            <Truck className="w-4 h-4 text-primary-600" />
+            <h3>Confirmar Entrega Física</h3>
+          </div>
+          <p className="text-xs text-gray-500 -mt-2">Al confirmar se descuenta el stock de los lotes del vale y se genera el despacho.</p>
+
+          <div className="border border-gray-200 rounded-xl overflow-hidden overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="table-header">Lote</th>
+                  <th className="table-header">Ubicación</th>
+                  <th className="table-header text-right">Cantidad a entregar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {solicitud.lotes_aprobados?.map(l => (
+                  <tr key={l.lote_id} className="table-row">
+                    <td className="table-cell font-medium">{l.lote_codigo}{l.pallet_numero ? ` · Pallet ${l.pallet_numero}` : ''}</td>
+                    <td className="table-cell">{[l.ubicacion_1, l.ubicacion_2].filter(Boolean).join(' / ') || '-'}</td>
+                    <td className="table-cell text-right tabular-nums font-semibold">{fmt.num(l.cantidad)} {solicitud.unidad}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="label">Frente / equipo destino</label>
-              <input className="input" value={formAprobar.frente_destino} onChange={e => setFormAprobar({ ...formAprobar, frente_destino: e.target.value })} />
+              <label className="label">Retirado por</label>
+              <input className="input" value={formEntrega.retirado_por} onChange={e => setFormEntrega({ ...formEntrega, retirado_por: e.target.value })} />
             </div>
             <div>
-              <label className="label">Retirado por</label>
-              <input className="input" value={formAprobar.retirado_por} onChange={e => setFormAprobar({ ...formAprobar, retirado_por: e.target.value })} />
+              <label className="label">Observaciones</label>
+              <input className="input" value={formEntrega.observaciones} onChange={e => setFormEntrega({ ...formEntrega, observaciones: e.target.value })} />
             </div>
           </div>
           <div>
-            <label className="label">Observaciones</label>
-            <input className="input" value={formAprobar.observaciones} onChange={e => setFormAprobar({ ...formAprobar, observaciones: e.target.value })} />
-          </div>
-          <div>
-            <label className="label">Foto de respaldo (opcional)</label>
+            <label className="label">Foto del material entregado *</label>
             <input ref={fotoRef} type="file" accept="image/*" capture="environment" className="input" />
           </div>
           <div>
@@ -203,8 +289,7 @@ export default function SolicitudDetallePage() {
           </div>
 
           <div className="flex justify-end gap-3 pt-2">
-            <button type="button" className="btn-secondary" onClick={() => setShowRechazar(true)}>Rechazar</button>
-            <button type="submit" disabled={guardando} className="btn-primary">{guardando ? 'Guardando...' : 'Aprobar y Despachar'}</button>
+            <button type="submit" disabled={guardando} className="btn-primary">{guardando ? 'Guardando...' : 'Confirmar Entrega'}</button>
           </div>
         </form>
       )}

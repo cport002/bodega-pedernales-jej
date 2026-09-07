@@ -5,8 +5,8 @@ import type { Solicitud } from '../types'
 import { ClipboardList } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 
-const ESTADO_BADGE: Record<string, string> = { pendiente: 'badge-amber', aprobada: 'badge-green', rechazada: 'badge-red' }
-const ESTADO_LABEL: Record<string, string> = { pendiente: 'Pendiente', aprobada: 'Aprobada', rechazada: 'Rechazada' }
+const ESTADO_BADGE: Record<string, string> = { pendiente: 'badge-amber', aprobada: 'badge-blue', entregada: 'badge-green', rechazada: 'badge-red' }
+const ESTADO_LABEL: Record<string, string> = { pendiente: 'Pendiente', aprobada: 'Vale listo', entregada: 'Entregada', rechazada: 'Rechazada' }
 
 export default function MisSolicitudesPage() {
   const [solicitudes, setSolicitudes] = useState<Solicitud[]>([])
@@ -33,6 +33,7 @@ export default function MisSolicitudesPage() {
                 <th className="table-header text-right">Cant. aprobada</th>
                 <th className="table-header">Frente destino</th>
                 <th className="table-header">Estado</th>
+                <th className="table-header text-center">Vale</th>
               </tr>
             </thead>
             <tbody>
@@ -49,10 +50,15 @@ export default function MisSolicitudesPage() {
                       <p className="text-xs text-gray-400 mt-1">{s.motivo_rechazo}</p>
                     )}
                   </td>
+                  <td className="table-cell text-center">
+                    {(s.estado === 'aprobada' || s.estado === 'entregada') && (
+                      <Link to={`/solicitudes/${s.id}`} className="text-primary-600 font-medium text-sm">Ver vale</Link>
+                    )}
+                  </td>
                 </tr>
               ))}
               {solicitudes.length === 0 && (
-                <tr><td colSpan={6} className="table-cell text-center text-gray-400 py-8">
+                <tr><td colSpan={7} className="table-cell text-center text-gray-400 py-8">
                   Todavía no has hecho ninguna solicitud. <Link to="/solicitar" className="text-primary-600 font-medium">Solicitar material</Link>
                 </td></tr>
               )}

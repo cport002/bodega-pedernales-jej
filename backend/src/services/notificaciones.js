@@ -25,10 +25,10 @@ async function notificarNuevaSolicitud(solicitud, materialDescripcion, solicitan
 }
 
 // Avisa al solicitante cuando su pedido fue aprobado o rechazado.
-async function notificarResolucionSolicitud(solicitud, materialDescripcion, aprobada, motivoRechazo) {
-  const titulo = aprobada ? 'Solicitud aprobada' : 'Solicitud rechazada';
+async function notificarResolucionSolicitud(solicitud, materialDescripcion, aprobada, motivoRechazo, folio) {
+  const titulo = aprobada ? 'Solicitud aprobada — vale listo' : 'Solicitud rechazada';
   const mensaje = aprobada
-    ? `Tu pedido de ${materialDescripcion} fue aprobado y ya se generó el despacho`
+    ? `Tu pedido de ${materialDescripcion} fue aprobado. Vale ${folio}: descárgalo y llévalo a bodega para retirar`
     : `Tu pedido de ${materialDescripcion} fue rechazado${motivoRechazo ? `: ${motivoRechazo}` : ''}`;
   await crearNotificacion(sql, {
     usuario_id: solicitud.solicitante_id,

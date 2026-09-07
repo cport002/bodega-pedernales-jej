@@ -187,6 +187,26 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 );
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_usuario ON push_subscriptions(usuario_id);
 
+-- Migracion: separa "aprobar" (decision, puede hacerse a distancia) de "entregar" (retiro fisico
+-- real en bodega). Antes ambos pasaban juntos: al aprobar ya se pedia firma/foto y se creaba el
+-- despacho de inmediato. Ahora aprobar solo genera un VALE (folio + QR) con los lotes/cantidades
+-- ya decididos pero SIN tocar stock todavia, recien al escanear el vale en bodega y confirmar la
+-- entrega (firma+foto obligatorias ahi) se crea el despacho real, que resta el stock en ESE momento
+-- y no al aprobar, asi si el stock cambio entretanto, se valida en el momento real del retiro.
+ALTER TABLE solicitudes DROP CONSTRAINT IF EXISTS solicitudes_estado_check;
+ALTER TABLE solicitudes ADD CONSTRAINT solicitudes_estado_check CHECK(estado IN ('pendiente','aprobada','rechazada','entregada'));
+ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS fecha_entrega TIMESTAMPTZ;
+
+-- Lotes y cantidades decididos al aprobar (el "plan" del vale) — el despacho real recien se crea
+-- al confirmar la entrega, usando esta tabla como guia.
+CREATE TABLE IF NOT EXISTS solicitud_lotes_aprobados (
+  id SERIAL PRIMARY KEY,
+  solicitud_id INTEGER NOT NULL REFERENCES solicitudes(id),
+  lote_id INTEGER NOT NULL REFERENCES lotes(id),
+  cantidad NUMERIC NOT NULL CHECK(cantidad > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_sla_solicitud ON solicitud_lotes_aprobados(solicitud_id);
+
 -- El stock ya no se calcula siempre desde la recepcion original: si el lote tiene al menos una
 -- auditoria de inventario registrada, el conteo mas reciente pasa a ser la base ("verdad" fisica
 -- confirmada), y solo se le suman/restan los despachos/devoluciones ocurridos DESPUES de esa fecha.

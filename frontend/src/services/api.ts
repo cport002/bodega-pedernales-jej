@@ -39,6 +39,20 @@ export const fmt = {
   fechaHora: (s?: string) => s ? new Date(s).toLocaleString('es-CL') : '-',
 }
 
+// Fuerza la descarga del archivo en vez de abrirlo en una pestaña nueva — window.open con un
+// blob: URL no funciona cuando el sistema está instalado como PWA en Android (no hay pestaña de
+// navegador que lo renderice), como ya se detectó y corrigió en control-activos-jej.
+export function descargarBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 // Convierte un dataURL (canvas de firma) a Blob para adjuntar en un FormData multipart.
 export function dataURLtoBlob(dataUrl: string): Blob {
   const [meta, base64] = dataUrl.split(',')

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import api, { fmt } from '../services/api'
+import api, { fmt, descargarBlob } from '../services/api'
 import type { Despacho } from '../types'
 import { PackageMinus, FileText } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
@@ -15,7 +15,7 @@ export default function DespachosPage() {
 
   const verPdf = async (id: number) => {
     const r = await api.get(`/despachos/${id}/pdf`, { responseType: 'blob' })
-    window.open(URL.createObjectURL(r.data), '_blank')
+    descargarBlob(r.data, `despacho_${id}.pdf`)
   }
 
   return (
