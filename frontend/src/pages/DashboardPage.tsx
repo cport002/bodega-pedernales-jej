@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import api, { fmt } from '../services/api'
 import type { ResumenReportes } from '../types'
 import PageHeader from '../components/ui/PageHeader'
+import GaugeVelocimetro, { colorPorPorcentaje } from '../components/ui/GaugeVelocimetro'
 import { LayoutDashboard, Package, Boxes, PackageX, PackageMinus, Undo2, AlertTriangle, ClipboardCheck, CheckCircle2, AlertCircle } from 'lucide-react'
 
 export default function DashboardPage() {
@@ -28,9 +29,29 @@ export default function DashboardPage() {
     { to: '/reportes/ncr', icon: AlertTriangle, label: 'NCR / Novedades abiertas', valor: resumen?.ncrAbiertos, color: 'from-red-700 to-red-500' },
   ]
 
+  const pctInventariado = totalMaterialesReales > 0 ? (Number(resumen?.totalLotesInventariados ?? 0) / totalMaterialesReales) * 100 : 0
+  const pctActivo = totalMaterialesReales > 0 ? (Number(resumen?.totalLotesActivos ?? 0) / totalMaterialesReales) * 100 : 0
+
   return (
     <div className="space-y-6">
       <PageHeader title="Dashboard" subtitle="Bodega Internacional Pedernales — JEJ Ingeniería" icon={LayoutDashboard} />
+
+      {resumen && (
+        <div className="card">
+          <h3 className="mb-1">Cobertura de Bodega</h3>
+          <p className="text-xs text-gray-500 mb-4">Estado general del catálogo de materiales, de un vistazo</p>
+          <div className="flex flex-wrap items-start justify-center gap-8 py-2">
+            <GaugeVelocimetro
+              value={pctInventariado} size={180} color={colorPorPorcentaje(pctInventariado)}
+              caption="Materiales Inventariados" targetCaption={`${resumen.totalLotesInventariados} de ${totalMaterialesReales}`}
+            />
+            <GaugeVelocimetro
+              value={pctActivo} size={180} color={colorPorPorcentaje(pctActivo)}
+              caption="Stock Activo" targetCaption={`${resumen.totalLotesActivos} de ${totalMaterialesReales}`}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {tarjetas.map(t => (
