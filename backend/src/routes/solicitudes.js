@@ -174,9 +174,15 @@ router.get('/:id/vale-pdf', autenticar, autorizar('admin', 'bodeguero', 'solicit
     if (solicitud.estado === 'pendiente' || solicitud.estado === 'rechazada') {
       return res.status(409).json({ error: 'Esta solicitud todavía no tiene un vale generado' });
     }
+    const lotes = (await sql(
+      `SELECT sla.lote_id, sla.cantidad, l.codigo AS lote_codigo, l.ubicacion_1, l.ubicacion_2, l.pallet_numero
+       FROM solicitud_lotes_aprobados sla JOIN lotes l ON l.id = sla.lote_id
+       WHERE sla.solicitud_id = ?`,
+      [solicitud.id]
+    )).rows;
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="vale_solicitud_${solicitud.id}.pdf"`);
-    await generarValePDF(solicitud, res);
+    await generarValePDF({ ...solicitud, lotes }, res);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

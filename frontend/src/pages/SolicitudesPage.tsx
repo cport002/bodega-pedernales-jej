@@ -55,7 +55,7 @@ function EscanearValeModal({ onClose }: { onClose: () => void }) {
 export default function SolicitudesPage() {
   const [solicitudes, setSolicitudes] = useState<Solicitud[]>([])
   const [loading, setLoading] = useState(true)
-  const [filtroEstado, setFiltroEstado] = useState('pendiente')
+  const [filtroEstado, setFiltroEstado] = useState('')
   const [showEscanear, setShowEscanear] = useState(false)
 
   useEffect(() => {
@@ -78,11 +78,11 @@ export default function SolicitudesPage() {
         <div className="min-w-[200px]">
           <label className="label">Estado</label>
           <select className="input" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}>
+            <option value="">Todas</option>
             <option value="pendiente">Pendientes</option>
             <option value="aprobada">Vale emitido (sin retirar)</option>
             <option value="entregada">Entregadas</option>
             <option value="rechazada">Rechazadas</option>
-            <option value="">Todas</option>
           </select>
         </div>
       </div>

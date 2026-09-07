@@ -23,7 +23,7 @@ export default function NuevaSolicitudPage() {
     if (seleccionado || !busqueda) { setMateriales([]); return }
     setBuscando(true)
     const t = setTimeout(() => {
-      api.get('/materiales', { params: { busqueda } })
+      api.get('/materiales', { params: { busqueda, estado: 'activo' } })
         .then(r => setMateriales(r.data))
         .catch(() => {})
         .finally(() => setBuscando(false))
