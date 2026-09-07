@@ -201,8 +201,6 @@ router.post('/:id/entregar', autenticar, autorizar('admin', 'bodeguero'), upload
 
     const firmaFile = req.files?.firma?.[0];
     if (!firmaFile) return res.status(400).json({ error: 'La firma digital de quien retira es requerida' });
-    const fotoFile = req.files?.foto?.[0];
-    if (!fotoFile) return res.status(400).json({ error: 'La foto del material entregado es requerida' });
 
     const asignaciones = (await sql(
       'SELECT lote_id, cantidad FROM solicitud_lotes_aprobados WHERE solicitud_id = ?',
@@ -212,7 +210,7 @@ router.post('/:id/entregar', autenticar, autorizar('admin', 'bodeguero'), upload
 
     const { retirado_por, observaciones } = req.body;
     const firma_url = urlArchivo(firmaFile);
-    const foto_url = urlArchivo(fotoFile);
+    const foto_url = urlArchivo(req.files?.foto?.[0]);
 
     const despachoIds = await withTransaction(async (tsql) => {
       const ids = [];

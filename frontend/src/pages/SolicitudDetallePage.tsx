@@ -76,7 +76,6 @@ export default function SolicitudDetallePage() {
   const handleEntregar = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!sigRef.current || sigRef.current.isEmpty()) { toast.error('La firma digital de quien retira es requerida'); return }
-    if (!fotoRef.current?.files?.[0]) { toast.error('La foto del material entregado es requerida'); return }
 
     setGuardando(true)
     try {
@@ -84,7 +83,7 @@ export default function SolicitudDetallePage() {
       Object.entries(formEntrega).forEach(([k, v]) => { if (v) form.append(k, v) })
       const firmaBlob = dataURLtoBlob(sigRef.current.getTrimmedCanvas().toDataURL('image/png'))
       form.append('firma', firmaBlob, 'firma.png')
-      form.append('foto', fotoRef.current.files[0])
+      if (fotoRef.current?.files?.[0]) form.append('foto', fotoRef.current.files[0])
       await api.post(`/solicitudes/${id}/entregar`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
       toast.success('Entrega confirmada')
       cargar()
@@ -280,7 +279,7 @@ export default function SolicitudDetallePage() {
             </div>
           </div>
           <div>
-            <label className="label">Foto del material entregado *</label>
+            <label className="label">Foto del material entregado (opcional)</label>
             <input ref={fotoRef} type="file" accept="image/*" capture="environment" className="input" />
           </div>
           <div>
