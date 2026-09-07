@@ -59,12 +59,12 @@ export default function Layout({ auth }: Props) {
         { to: '/materiales', icon: Package, label: 'Materiales' },
         { to: '/recepciones', icon: PackagePlus, label: 'Recepciones' },
         { to: '/lotes', icon: Search, label: 'Buscar Lote / Stock' },
+        ...(auth.puedeOperar ? [{ to: '/solicitudes', icon: ClipboardList, label: 'Solicitudes', badge: pendientes }] : []),
         { to: '/despachos', icon: PackageMinus, label: 'Despachos' },
         { to: '/devoluciones', icon: Undo2, label: 'Devoluciones' },
         { to: '/inventarios', icon: ClipboardCheck, label: 'Inventario' },
-        ...(auth.puedeOperar ? [{ to: '/solicitudes', icon: ClipboardList, label: 'Solicitudes', badge: pendientes }] : []),
-        { to: '/reportes/ncr', icon: AlertTriangle, label: 'NCR / Novedades' },
         ...(auth.esAdmin ? [{ to: '/usuarios', icon: Users, label: 'Usuarios' }] : []),
+        { to: '/reportes/ncr', icon: AlertTriangle, label: 'NCR / Novedades' },
       ]
 
   const handleLogout = () => {
