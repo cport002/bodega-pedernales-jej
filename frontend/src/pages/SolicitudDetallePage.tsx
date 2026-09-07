@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import api, { fmt, dataURLtoBlob, descargarBlob } from '../services/api'
+import { useParams, useNavigate, Link } from 'react-router-dom'
+import api, { fmt, dataURLtoBlob, descargarBlob, comprimirFoto } from '../services/api'
 import type { Solicitud } from '../types'
 import type SignatureCanvas from 'react-signature-canvas'
 import toast from 'react-hot-toast'
-import { ClipboardList, FileText, X, Download, QrCode, Truck } from 'lucide-react'
+import { ClipboardList, FileText, X, Download, QrCode, Truck, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import FirmaCanvas from '../components/FirmaCanvas'
 import { useAuth } from '../hooks/useAuth'
@@ -16,7 +16,8 @@ type Asignacion = { checked: boolean; cantidad: string }
 
 export default function SolicitudDetallePage() {
   const { id } = useParams()
-  const { puedeOperar } = useAuth()
+  const navigate = useNavigate()
+  const { puedeOperar, usuario } = useAuth()
   const [solicitud, setSolicitud] = useState<Solicitud | null>(null)
   const [asignaciones, setAsignaciones] = useState<Record<number, Asignacion>>({})
   const [frenteDestino, setFrenteDestino] = useState('')
@@ -24,6 +25,9 @@ export default function SolicitudDetallePage() {
   const [guardando, setGuardando] = useState(false)
   const [showRechazar, setShowRechazar] = useState(false)
   const [motivoRechazo, setMotivoRechazo] = useState('')
+  const [showEditar, setShowEditar] = useState(false)
+  const [formEditar, setFormEditar] = useState({ cantidad: '', frente_destino: '', observaciones: '' })
+  const [showEliminar, setShowEliminar] = useState(false)
 
   const sigRef = useRef<SignatureCanvas | null>(null)
   const fotoRef = useRef<HTMLInputElement | null>(null)
@@ -73,6 +77,45 @@ export default function SolicitudDetallePage() {
     } finally { setGuardando(false) }
   }
 
+  const abrirEditar = () => {
+    if (!solicitud) return
+    setFormEditar({
+      cantidad: String(solicitud.cantidad_solicitada),
+      frente_destino: solicitud.frente_destino || '',
+      observaciones: solicitud.observaciones || '',
+    })
+    setShowEditar(true)
+  }
+
+  const handleEditar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setGuardando(true)
+    try {
+      await api.put(`/solicitudes/${id}`, {
+        cantidad: Number(formEditar.cantidad),
+        frente_destino: formEditar.frente_destino || null,
+        observaciones: formEditar.observaciones || null,
+      })
+      toast.success('Solicitud actualizada')
+      setShowEditar(false)
+      cargar()
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Error al editar la solicitud')
+    } finally { setGuardando(false) }
+  }
+
+  const handleEliminar = async () => {
+    setGuardando(true)
+    try {
+      await api.delete(`/solicitudes/${id}`)
+      toast.success('Solicitud eliminada')
+      navigate(puedeOperar ? '/solicitudes' : '/mis-solicitudes')
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Error al eliminar la solicitud')
+      setGuardando(false)
+    }
+  }
+
   const handleEntregar = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!sigRef.current || sigRef.current.isEmpty()) { toast.error('La firma digital de quien retira es requerida'); return }
@@ -83,7 +126,7 @@ export default function SolicitudDetallePage() {
       Object.entries(formEntrega).forEach(([k, v]) => { if (v) form.append(k, v) })
       const firmaBlob = dataURLtoBlob(sigRef.current.getTrimmedCanvas().toDataURL('image/png'))
       form.append('firma', firmaBlob, 'firma.png')
-      if (fotoRef.current?.files?.[0]) form.append('foto', fotoRef.current.files[0])
+      if (fotoRef.current?.files?.[0]) form.append('foto', await comprimirFoto(fotoRef.current.files[0]))
       await api.post(`/solicitudes/${id}/entregar`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
       toast.success('Entrega confirmada')
       cargar()
@@ -109,10 +152,27 @@ export default function SolicitudDetallePage() {
   if (!solicitud) return <div className="flex items-center justify-center h-32 text-gray-500">Cargando...</div>
 
   const totalAsignado = Object.values(asignaciones).filter(a => a.checked).reduce((acc, a) => acc + (Number(a.cantidad) || 0), 0)
+  const esDueno = usuario?.id === solicitud.solicitante_id
+  const puedeEditar = solicitud.estado === 'pendiente' && (puedeOperar || esDueno)
+  const puedeEliminar = solicitud.estado !== 'entregada' && (puedeOperar || esDueno)
 
   return (
     <div className="space-y-6">
-      <PageHeader title={`Solicitud #${solicitud.id}`} subtitle={solicitud.material_descripcion} icon={ClipboardList} />
+      <PageHeader title={`Solicitud #${solicitud.id}`} subtitle={solicitud.material_descripcion} icon={ClipboardList}
+        actions={
+          <>
+            {puedeEditar && (
+              <button onClick={abrirEditar} className="inline-flex items-center gap-2 bg-white text-primary-700 font-semibold text-sm px-4 py-2 rounded-xl hover:bg-primary-50 transition-colors shadow-sm">
+                <Pencil className="w-4 h-4" /> Editar
+              </button>
+            )}
+            {puedeEliminar && (
+              <button onClick={() => setShowEliminar(true)} className="inline-flex items-center gap-2 bg-white text-red-600 font-semibold text-sm px-4 py-2 rounded-xl hover:bg-red-50 transition-colors shadow-sm">
+                <Trash2 className="w-4 h-4" /> Eliminar
+              </button>
+            )}
+          </>
+        } />
 
       <div className="card grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <div><p className="label mb-0.5">Solicitante</p><p className="font-medium text-gray-800">{solicitud.solicitante_nombre}</p></div>
@@ -310,6 +370,62 @@ export default function SolicitudDetallePage() {
                 <button type="submit" disabled={guardando} className="btn-primary">{guardando ? 'Guardando...' : 'Confirmar Rechazo'}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showEditar && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+              <h2>Editar solicitud</h2>
+              <button onClick={() => setShowEditar(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleEditar} className="p-6 space-y-4">
+              <div>
+                <label className="label">Cantidad ({solicitud.unidad}) *</label>
+                <input type="number" min={0.01} step="0.01" required className="input"
+                  value={formEditar.cantidad} onChange={e => setFormEditar({ ...formEditar, cantidad: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Frente / equipo destino</label>
+                <input className="input" value={formEditar.frente_destino} onChange={e => setFormEditar({ ...formEditar, frente_destino: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Observaciones</label>
+                <input className="input" value={formEditar.observaciones} onChange={e => setFormEditar({ ...formEditar, observaciones: e.target.value })} />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" className="btn-secondary" onClick={() => setShowEditar(false)}>Cancelar</button>
+                <button type="submit" disabled={guardando} className="btn-primary">{guardando ? 'Guardando...' : 'Guardar Cambios'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showEliminar && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-red-700"><AlertTriangle className="w-5 h-5" /> Eliminar solicitud</h2>
+              <button onClick={() => setShowEliminar(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-700">
+                ¿Seguro que quieres eliminar la solicitud de <strong>{fmt.num(solicitud.cantidad_solicitada)} {solicitud.unidad}</strong> de <strong>{solicitud.material_descripcion}</strong>?
+              </p>
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Esta acción no se puede deshacer desde el sistema — dejará de aparecer en los listados. El registro queda guardado internamente para auditoría.
+              </p>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" className="btn-secondary" onClick={() => setShowEliminar(false)}>Cancelar</button>
+                <button type="button" disabled={guardando} onClick={handleEliminar}
+                  className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold text-sm px-4 py-2 rounded-xl transition-colors disabled:opacity-60">
+                  <Trash2 className="w-4 h-4" /> {guardando ? 'Eliminando...' : 'Sí, Eliminar'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

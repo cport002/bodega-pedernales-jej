@@ -23,7 +23,7 @@ const SELECT_DETALLE = `
 // GET /api/solicitudes?estado=&solicitante_id=  (un solicitante siempre ve solo las suyas)
 router.get('/', autenticar, autorizar('admin', 'bodeguero', 'solicitante'), async (req, res) => {
   try {
-    const condiciones = [];
+    const condiciones = ['s.eliminada = false'];
     const params = [];
     if (req.usuario.rol === 'solicitante') {
       condiciones.push('s.solicitante_id = ?');
@@ -45,7 +45,7 @@ router.get('/', autenticar, autorizar('admin', 'bodeguero', 'solicitante'), asyn
 // GET /api/solicitudes/pendientes/count — badge del sidebar (admin/bodeguero)
 router.get('/pendientes/count', autenticar, autorizar('admin', 'bodeguero'), async (req, res) => {
   try {
-    const r = await sql("SELECT COUNT(*) AS total FROM solicitudes WHERE estado = 'pendiente'");
+    const r = await sql("SELECT COUNT(*) AS total FROM solicitudes WHERE estado = 'pendiente' AND eliminada = false");
     res.json({ total: Number(r.rows[0].total) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -54,7 +54,7 @@ router.get('/pendientes/count', autenticar, autorizar('admin', 'bodeguero'), asy
 // aprobar) y los despachos ya generados si fue aprobada.
 router.get('/:id', autenticar, autorizar('admin', 'bodeguero', 'solicitante'), async (req, res) => {
   try {
-    const solicitud = (await sql(`${SELECT_DETALLE} WHERE s.id = ?`, [req.params.id])).rows[0];
+    const solicitud = (await sql(`${SELECT_DETALLE} WHERE s.id = ? AND s.eliminada = false`, [req.params.id])).rows[0];
     if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' });
     if (req.usuario.rol === 'solicitante' && solicitud.solicitante_id !== req.usuario.id) {
       return res.status(403).json({ error: 'Sin permisos para ver esta solicitud' });
@@ -101,10 +101,54 @@ router.post('/', autenticar, autorizar('admin', 'bodeguero', 'solicitante'), asy
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// PUT /api/solicitudes/:id — editar cantidad/frente/observaciones, solo mientras esta pendiente
+// (una vez aprobada ya hay un vale con lotes/cantidad decididos, editar el pedido original ya no
+// tiene sentido). El propio solicitante puede editar su pedido; admin/bodeguero, cualquiera.
+router.put('/:id', autenticar, autorizar('admin', 'bodeguero', 'solicitante'), async (req, res) => {
+  try {
+    const solicitud = (await sql('SELECT * FROM solicitudes WHERE id = ? AND eliminada = false', [req.params.id])).rows[0];
+    if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' });
+    if (req.usuario.rol === 'solicitante' && solicitud.solicitante_id !== req.usuario.id) {
+      return res.status(403).json({ error: 'Sin permisos para editar esta solicitud' });
+    }
+    if (solicitud.estado !== 'pendiente') {
+      return res.status(409).json({ error: 'Solo se puede editar mientras está pendiente de revisión' });
+    }
+    const cant = Number(req.body.cantidad);
+    if (!cant || cant <= 0) return res.status(400).json({ error: 'La cantidad debe ser mayor a cero' });
+    await sql(
+      `UPDATE solicitudes SET cantidad_solicitada = ?, frente_destino = ?, observaciones = ? WHERE id = ?`,
+      [cant, req.body.frente_destino || null, req.body.observaciones || null, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/solicitudes/:id — eliminacion blanda (marca eliminada, nunca borra la fila) mientras
+// no este entregada. El propio solicitante puede eliminar su pedido; admin/bodeguero, cualquiera.
+router.delete('/:id', autenticar, autorizar('admin', 'bodeguero', 'solicitante'), async (req, res) => {
+  try {
+    const solicitud = (await sql('SELECT * FROM solicitudes WHERE id = ? AND eliminada = false', [req.params.id])).rows[0];
+    if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' });
+    if (req.usuario.rol === 'solicitante' && solicitud.solicitante_id !== req.usuario.id) {
+      return res.status(403).json({ error: 'Sin permisos para eliminar esta solicitud' });
+    }
+    if (solicitud.estado === 'entregada') {
+      return res.status(409).json({ error: 'No se puede eliminar una solicitud ya entregada' });
+    }
+    await sql(
+      `UPDATE solicitudes SET eliminada = true, eliminada_por = ?, fecha_eliminacion = NOW() WHERE id = ?`,
+      [req.usuario.id, req.params.id]
+    );
+    await sql('DELETE FROM notificaciones WHERE solicitud_id = ?', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // PUT /api/solicitudes/:id/rechazar
 router.put('/:id/rechazar', autenticar, autorizar('admin', 'bodeguero'), async (req, res) => {
   try {
-    const solicitud = (await sql('SELECT * FROM solicitudes WHERE id = ?', [req.params.id])).rows[0];
+    const solicitud = (await sql('SELECT * FROM solicitudes WHERE id = ? AND eliminada = false', [req.params.id])).rows[0];
     if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' });
     if (solicitud.estado !== 'pendiente') return res.status(409).json({ error: 'La solicitud ya fue resuelta' });
     await sql(
@@ -122,7 +166,7 @@ router.put('/:id/rechazar', autenticar, autorizar('admin', 'bodeguero'), async (
 // pide firma/foto todavia, eso pasa recien al confirmar la entrega fisica (ver /:id/entregar).
 router.post('/:id/aprobar', autenticar, autorizar('admin', 'bodeguero'), async (req, res) => {
   try {
-    const solicitud = (await sql('SELECT * FROM solicitudes WHERE id = ?', [req.params.id])).rows[0];
+    const solicitud = (await sql('SELECT * FROM solicitudes WHERE id = ? AND eliminada = false', [req.params.id])).rows[0];
     if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' });
     if (solicitud.estado !== 'pendiente') return res.status(409).json({ error: 'La solicitud ya fue resuelta' });
 
@@ -166,7 +210,7 @@ router.post('/:id/aprobar', autenticar, autorizar('admin', 'bodeguero'), async (
 // GET /api/solicitudes/:id/vale-pdf — vale imprimible con QR del folio, para llevar a bodega.
 router.get('/:id/vale-pdf', autenticar, autorizar('admin', 'bodeguero', 'solicitante'), async (req, res) => {
   try {
-    const solicitud = (await sql(`${SELECT_DETALLE} WHERE s.id = ?`, [req.params.id])).rows[0];
+    const solicitud = (await sql(`${SELECT_DETALLE} WHERE s.id = ? AND s.eliminada = false`, [req.params.id])).rows[0];
     if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' });
     if (req.usuario.rol === 'solicitante' && solicitud.solicitante_id !== req.usuario.id) {
       return res.status(403).json({ error: 'Sin permisos para ver esta solicitud' });
@@ -195,7 +239,7 @@ router.post('/:id/entregar', autenticar, autorizar('admin', 'bodeguero'), upload
   { name: 'foto', maxCount: 1 }
 ]), async (req, res) => {
   try {
-    const solicitud = (await sql('SELECT * FROM solicitudes WHERE id = ?', [req.params.id])).rows[0];
+    const solicitud = (await sql('SELECT * FROM solicitudes WHERE id = ? AND eliminada = false', [req.params.id])).rows[0];
     if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' });
     if (solicitud.estado !== 'aprobada') return res.status(409).json({ error: 'Esta solicitud no tiene un vale pendiente de retiro' });
 

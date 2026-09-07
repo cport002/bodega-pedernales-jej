@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import api, { fmt, dataURLtoBlob } from '../services/api'
+import api, { fmt, dataURLtoBlob, comprimirFoto } from '../services/api'
 import type { Lote } from '../types'
 import type SignatureCanvas from 'react-signature-canvas'
 import toast from 'react-hot-toast'
@@ -45,7 +45,7 @@ export default function LoteDetallePage() {
     form.append('lote_id', String(id))
     const firmaBlob = dataURLtoBlob(sigRef.current.getTrimmedCanvas().toDataURL('image/png'))
     form.append('firma', firmaBlob, 'firma.png')
-    if (fotoRef.current?.files?.[0]) form.append('foto', fotoRef.current.files[0])
+    if (fotoRef.current?.files?.[0]) form.append('foto', await comprimirFoto(fotoRef.current.files[0]))
     await api.post(endpoint, form, { headers: { 'Content-Type': 'multipart/form-data' } })
     return true
   }

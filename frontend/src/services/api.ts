@@ -53,6 +53,38 @@ export function descargarBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
+// Comprime una foto de cámara antes de subirla — celulares Android reales toman fotos de 8-15 MB
+// a resolución completa, y cargar eso en memoria en el navegador para armar el multipart puede
+// tirar "memoria insuficiente" en equipos con poca RAM libre. Se redibuja a un tamaño razonable
+// (máx. 1600px de lado) y se reexporta como JPEG comprimido — sigue sirviendo perfecto como
+// evidencia visual, pesa una fracción del original. Si el archivo ya es chico, se deja tal cual
+// (createImageBitmap + canvas igual gastan memoria, no vale la pena para un archivo ya liviano).
+const UMBRAL_COMPRESION_BYTES = 1.5 * 1024 * 1024
+const LADO_MAXIMO = 1600
+const CALIDAD_JPEG = 0.75
+
+export async function comprimirFoto(file: File): Promise<File> {
+  if (!file.type.startsWith('image/') || file.size <= UMBRAL_COMPRESION_BYTES) return file
+  try {
+    const bitmap = await createImageBitmap(file)
+    const escala = Math.min(1, LADO_MAXIMO / Math.max(bitmap.width, bitmap.height))
+    const w = Math.round(bitmap.width * escala)
+    const h = Math.round(bitmap.height * escala)
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return file
+    ctx.drawImage(bitmap, 0, 0, w, h)
+    bitmap.close()
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', CALIDAD_JPEG))
+    if (!blob) return file
+    return new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' })
+  } catch {
+    return file // si algo falla comprimiendo, se sube el original tal cual antes que bloquear el flujo
+  }
+}
+
 // Convierte un dataURL (canvas de firma) a Blob para adjuntar en un FormData multipart.
 export function dataURLtoBlob(dataUrl: string): Blob {
   const [meta, base64] = dataUrl.split(',')

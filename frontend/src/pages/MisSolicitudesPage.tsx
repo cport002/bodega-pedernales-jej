@@ -33,7 +33,7 @@ export default function MisSolicitudesPage() {
                 <th className="table-header text-right">Cant. aprobada</th>
                 <th className="table-header">Frente destino</th>
                 <th className="table-header">Estado</th>
-                <th className="table-header text-center">Vale</th>
+                <th className="table-header text-center">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -51,9 +51,9 @@ export default function MisSolicitudesPage() {
                     )}
                   </td>
                   <td className="table-cell text-center">
-                    {(s.estado === 'aprobada' || s.estado === 'entregada') && (
-                      <Link to={`/solicitudes/${s.id}`} className="text-primary-600 font-medium text-sm">Ver vale</Link>
-                    )}
+                    <Link to={`/solicitudes/${s.id}`} className="text-primary-600 font-medium text-sm">
+                      {s.estado === 'aprobada' || s.estado === 'entregada' ? 'Ver vale' : 'Ver'}
+                    </Link>
                   </td>
                 </tr>
               ))}

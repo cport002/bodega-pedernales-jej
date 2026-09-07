@@ -207,6 +207,14 @@ CREATE TABLE IF NOT EXISTS solicitud_lotes_aprobados (
 );
 CREATE INDEX IF NOT EXISTS idx_sla_solicitud ON solicitud_lotes_aprobados(solicitud_id);
 
+-- Eliminacion "blanda": la fila nunca se borra de verdad (auditoria completa), solo se marca y se
+-- oculta de los listados normales. Pedido explicito del usuario: poder eliminar una solicitud
+-- (propia o cualquiera, si es admin/bodeguero) mientras no este entregada, pero sin perder el
+-- registro para el historial.
+ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS eliminada BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS eliminada_por INTEGER REFERENCES usuarios(id);
+ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS fecha_eliminacion TIMESTAMPTZ;
+
 -- El stock ya no se calcula siempre desde la recepcion original: si el lote tiene al menos una
 -- auditoria de inventario registrada, el conteo mas reciente pasa a ser la base ("verdad" fisica
 -- confirmada), y solo se le suman/restan los despachos/devoluciones ocurridos DESPUES de esa fecha.
