@@ -133,9 +133,13 @@ export default function SolicitudDetallePage() {
     }
   }
 
-  const verPdf = async (despachoId: number) => {
-    const r = await api.get(`/despachos/${despachoId}/pdf`, { responseType: 'blob' })
-    descargarBlob(r.data, `despacho_${despachoId}.pdf`)
+  const descargarComprobante = async () => {
+    try {
+      const r = await api.get(`/solicitudes/${id}/comprobante-pdf`, { responseType: 'blob' })
+      descargarBlob(r.data, `comprobante_${solicitud?.folio || id}.pdf`)
+    } catch {
+      toast.error('No se pudo generar el comprobante')
+    }
   }
 
   if (!solicitud) return <div className="flex items-center justify-center h-32 text-gray-500">Cargando...</div>
@@ -231,35 +235,48 @@ export default function SolicitudDetallePage() {
       )}
 
       {solicitud.estado === 'entregada' && (
-        <div className="card p-0 overflow-hidden overflow-x-auto">
-          <div className="p-4 border-b border-gray-100"><h3>Despachos generados</h3></div>
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="table-header">Material</th>
-                <th className="table-header">Lote</th>
-                <th className="table-header text-right">Cantidad</th>
-                <th className="table-header">Fecha</th>
-                <th className="table-header text-center">Comprobante</th>
-              </tr>
-            </thead>
-            <tbody>
-              {solicitud.despachos?.map(d => (
-                <tr key={d.id} className="table-row">
-                  <td className="table-cell">{d.material_descripcion}</td>
-                  <td className="table-cell"><Link to={`/lotes/${d.lote_id}`} className="font-medium text-primary-600">{d.lote_codigo}</Link></td>
-                  <td className="table-cell text-right tabular-nums">{fmt.num(d.cantidad)} {d.unidad}</td>
-                  <td className="table-cell">{fmt.fechaHora(d.fecha)}</td>
-                  <td className="table-cell text-center">
-                    <button onClick={() => verPdf(d.id)} className="text-gray-400 hover:text-primary-600 inline-block">
-                      <FileText className="w-4 h-4" />
-                    </button>
-                  </td>
+        <>
+          <div className="card border-2 border-green-100 bg-green-50/40">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-green-600 flex items-center justify-center flex-shrink-0">
+                  <FileText className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-900">Entrega confirmada</p>
+                  <p className="text-xs text-gray-500">Folio <strong>{solicitud.folio}</strong> — comprobante con firma y los {items.length} material{items.length !== 1 ? 'es' : ''} entregados</p>
+                </div>
+              </div>
+              <button onClick={descargarComprobante} className="btn-primary flex items-center gap-2 whitespace-nowrap">
+                <Download className="w-4 h-4" /> Descargar Comprobante
+              </button>
+            </div>
+          </div>
+
+          <div className="card p-0 overflow-hidden overflow-x-auto">
+            <div className="p-4 border-b border-gray-100"><h3>Materiales entregados</h3></div>
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="table-header">Material</th>
+                  <th className="table-header">Lote</th>
+                  <th className="table-header text-right">Cantidad</th>
+                  <th className="table-header">Fecha</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {solicitud.despachos?.map(d => (
+                  <tr key={d.id} className="table-row">
+                    <td className="table-cell">{d.material_descripcion}</td>
+                    <td className="table-cell"><Link to={`/lotes/${d.lote_id}`} className="font-medium text-primary-600">{d.lote_codigo}</Link></td>
+                    <td className="table-cell text-right tabular-nums">{fmt.num(d.cantidad)} {d.unidad}</td>
+                    <td className="table-cell">{fmt.fechaHora(d.fecha)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {solicitud.estado === 'pendiente' && puedeOperar && (

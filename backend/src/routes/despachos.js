@@ -16,13 +16,27 @@ const SELECT_DETALLE = `
   LEFT JOIN usuarios u ON u.id = d.usuario_id
 `;
 
-// GET /api/despachos?lote_id=
+// GET /api/despachos?lote_id=&busqueda=&desde=&hasta=
+// busqueda matchea N° de despacho, código de lote, material, frente destino, retirado por y quien
+// registro — un solo campo para no obligar al bodeguero a saber en cual de esos buscar.
 router.get('/', autenticar, autorizar('admin', 'bodeguero', 'visor'), async (req, res) => {
   try {
-    const { lote_id } = req.query;
-    const condiciones = lote_id ? 'WHERE d.lote_id = ?' : '';
-    const params = lote_id ? [lote_id] : [];
-    const r = await sql(`${SELECT_DETALLE} ${condiciones} ORDER BY d.id DESC LIMIT 200`, params);
+    const { lote_id, busqueda, desde, hasta } = req.query;
+    const condiciones = [];
+    const params = [];
+    if (lote_id) { condiciones.push('d.lote_id = ?'); params.push(lote_id); }
+    if (busqueda) {
+      condiciones.push(`(
+        CAST(d.id AS TEXT) = ? OR l.codigo ILIKE ? OR m.descripcion ILIKE ?
+        OR d.frente_destino ILIKE ? OR d.retirado_por ILIKE ? OR u.nombre ILIKE ?
+      )`);
+      const like = `%${busqueda}%`;
+      params.push(busqueda.trim(), like, like, like, like, like);
+    }
+    if (desde) { condiciones.push('d.fecha >= ?'); params.push(`${desde} 00:00:00`); }
+    if (hasta) { condiciones.push('d.fecha <= ?'); params.push(`${hasta} 23:59:59`); }
+    const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
+    const r = await sql(`${SELECT_DETALLE} ${where} ORDER BY d.id DESC LIMIT 300`, params);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

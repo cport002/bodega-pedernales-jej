@@ -120,6 +120,7 @@ export interface Movimiento {
 export interface Despacho {
   id: number
   lote_id: number
+  solicitud_id?: number | null
   lote_codigo: string
   tag?: string | null
   pallet_numero?: string | null

@@ -78,4 +78,68 @@ async function generarComprobantePDF({ tipo, movimiento }, res) {
   doc.end();
 }
 
-module.exports = { generarComprobantePDF };
+// Comprobante CONSOLIDADO de un pedido completo (puede ser uno o varios materiales) — a diferencia
+// de generarComprobantePDF (un despacho individual, cada uno con su propio id autoincremental),
+// este usa el FOLIO del pedido como numero, para que coincida con lo que ve el solicitante en su
+// "Solicitud #N" y no se confunda con el id interno de cada despacho de bodega.
+async function generarComprobantePedidoPDF({ folio, despachos }, res) {
+  const M = 56;
+  const PAGE_W = 595.28;
+  const CONTENT_W = PAGE_W - M * 2;
+
+  const doc = new PDFDocument({ size: 'A4', margins: { top: M, bottom: 70, left: M, right: M } });
+  doc.pipe(res);
+
+  const d0 = despachos[0];
+
+  doc.font('Helvetica-Bold').fontSize(16).fillColor(GRIS_900).text('JEJ Ingeniería — Bodega Internacional Pedernales', M, M);
+  doc.font('Helvetica').fontSize(13).fillColor(AZUL).text('Comprobante de Entrega', M, doc.y + 4);
+  doc.font('Helvetica').fontSize(9).fillColor(GRIS_400).text(`Folio ${folio} · ${new Date(d0.fecha).toLocaleString('es-CL')}`, M, doc.y + 2);
+  doc.moveDown(1.2);
+
+  function fila(label, valor) {
+    const y = doc.y;
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(GRIS_600).text(label, M, y, { width: 160 });
+    doc.font('Helvetica').fontSize(10).fillColor(GRIS_900).text(String(valor ?? '-'), M + 160, y, { width: CONTENT_W - 160 });
+    doc.moveDown(0.35);
+  }
+
+  doc.font('Helvetica-Bold').fontSize(12).fillColor(GRIS_900).text('Detalle del movimiento');
+  doc.moveDown(0.3);
+  fila('Frente de destino', d0.frente_destino);
+  fila('Retirado por', d0.retirado_por);
+  fila('Observaciones', d0.observaciones);
+  fila('Registrado por', d0.usuario_nombre);
+
+  doc.moveDown(0.6);
+  doc.font('Helvetica-Bold').fontSize(12).fillColor(GRIS_900).text(`Materiales entregados (${despachos.length})`);
+  doc.moveDown(0.3);
+  // Nombre y detalle de lote en lineas propias a ancho completo (no en columna fija) — los nombres
+  // de material suelen ser largos y envolver a varias lineas, y fila() asume una sola linea.
+  for (const d of despachos) {
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(GRIS_900).text(d.material_descripcion, M, doc.y, { width: CONTENT_W });
+    doc.font('Helvetica').fontSize(9).fillColor(GRIS_600)
+      .text(`Lote ${d.lote_codigo}${d.pallet_numero ? ` · Pallet ${d.pallet_numero}` : ''} — ${d.cantidad} ${d.unidad}`, M, doc.y, { width: CONTENT_W });
+    doc.moveDown(0.5);
+  }
+
+  doc.moveDown(0.8);
+  const firma = await descargarImagen(d0.firma_url);
+  if (firma) {
+    doc.font('Helvetica-Bold').fontSize(11).fillColor(GRIS_900).text('Firma');
+    doc.moveDown(0.2);
+    try { doc.image(firma, M, doc.y, { width: 200, height: 90, fit: [200, 90] }); doc.y += 95; } catch { /* firma no válida, se omite */ }
+  }
+
+  const foto = await descargarImagen(d0.foto_url);
+  if (foto) {
+    doc.moveDown(0.5);
+    doc.font('Helvetica-Bold').fontSize(11).fillColor(GRIS_900).text('Evidencia fotográfica');
+    doc.moveDown(0.3);
+    try { doc.image(foto, M, doc.y, { width: 180, height: 180, fit: [180, 180] }); doc.y += 185; } catch { /* foto no válida, se omite */ }
+  }
+
+  doc.end();
+}
+
+module.exports = { generarComprobantePDF, generarComprobantePedidoPDF };

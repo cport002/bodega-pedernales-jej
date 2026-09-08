@@ -6,6 +6,7 @@ const { crearDespachoEnTransaccion } = require('../services/despachoService');
 const { notificarNuevaSolicitud, notificarResolucionSolicitud } = require('../services/notificaciones');
 const { generarFolioSolicitud } = require('../services/qr');
 const { generarValePDF } = require('../services/valePdf');
+const { generarComprobantePedidoPDF } = require('../services/comprobantePdf');
 
 const router = express.Router();
 
@@ -319,6 +320,37 @@ router.get('/:id/vale-pdf', autenticar, autorizar('admin', 'bodeguero', 'solicit
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="vale_solicitud_${pedido.id}.pdf"`);
     await generarValePDF({ ...pedido, items }, res);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/solicitudes/:id/comprobante-pdf — comprobante de entrega CONSOLIDADO del pedido completo
+// (todos los materiales entregados, en un solo documento, usando el folio del pedido como numero).
+// Reemplaza la confusion de descargar el PDF de cada despacho individual por separado (cada uno con
+// su propio id de bodega, sin relacion con el numero de solicitud que ve el solicitante).
+router.get('/:id/comprobante-pdf', autenticar, autorizar('admin', 'bodeguero', 'solicitante'), async (req, res) => {
+  try {
+    const pedido = (await sql('SELECT * FROM solicitudes WHERE id = ? AND eliminada = false', [req.params.id])).rows[0];
+    if (!pedido) return res.status(404).json({ error: 'Solicitud no encontrada' });
+    if (req.usuario.rol === 'solicitante' && pedido.solicitante_id !== req.usuario.id) {
+      return res.status(403).json({ error: 'Sin permisos para ver esta solicitud' });
+    }
+    if (pedido.estado !== 'entregada') return res.status(409).json({ error: 'Esta solicitud todavía no ha sido entregada' });
+
+    const despachos = (await sql(
+      `SELECT d.id, d.lote_id, d.cantidad, d.fecha, d.frente_destino, d.retirado_por, d.observaciones,
+         d.firma_url, d.foto_url, u.nombre AS usuario_nombre,
+         l.codigo AS lote_codigo, l.pallet_numero, m.descripcion AS material_descripcion, m.unidad
+       FROM despachos d JOIN lotes l ON l.id = d.lote_id JOIN materiales m ON m.id = l.material_id
+       LEFT JOIN usuarios u ON u.id = d.usuario_id
+       WHERE d.solicitud_id = ? ORDER BY d.id`,
+      [pedido.id]
+    )).rows;
+    if (despachos.length === 0) return res.status(404).json({ error: 'Sin despachos registrados para este pedido' });
+
+    const folio = generarFolioSolicitud(pedido.id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="comprobante_${folio}.pdf"`);
+    await generarComprobantePedidoPDF({ folio, despachos }, res);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
