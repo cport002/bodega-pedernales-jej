@@ -22,7 +22,7 @@ router.post('/login', async (req, res) => {
 
     res.json({
       token,
-      usuario: { id: usuario.id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol }
+      usuario: { id: usuario.id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol, pyc_empresa_id: usuario.pyc_empresa_id }
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

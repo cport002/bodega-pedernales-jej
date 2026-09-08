@@ -20,6 +20,10 @@ import NuevaSolicitudPage from './pages/NuevaSolicitudPage'
 import MisSolicitudesPage from './pages/MisSolicitudesPage'
 import SolicitudesPage from './pages/SolicitudesPage'
 import SolicitudDetallePage from './pages/SolicitudDetallePage'
+import PycEmpresasPage from './pages/PycEmpresasPage'
+import PycEmpresaDetallePage from './pages/PycEmpresaDetallePage'
+import PycReporteFormPage from './pages/PycReporteFormPage'
+import PycReporteDetallePage from './pages/PycReporteDetallePage'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -35,7 +39,11 @@ export default function App() {
       <Routes>
         <Route path="/login" element={auth.token ? <Navigate to="/" replace /> : <LoginPage onLogin={auth.login} />} />
         <Route path="/" element={<PrivateRoute><Layout auth={auth} /></PrivateRoute>}>
-          <Route index element={auth.esSolicitante ? <Navigate to="/solicitar" replace /> : <DashboardPage />} />
+          <Route index element={
+            auth.esSolicitante ? <Navigate to="/solicitar" replace />
+              : auth.esContratista ? <Navigate to={`/pyc/${auth.usuario?.pyc_empresa_id}`} replace />
+              : <DashboardPage />
+          } />
           <Route path="materiales" element={<MaterialesPage />} />
           <Route path="recepciones" element={<RecepcionesPage />} />
           <Route path="recepciones/nueva" element={<NuevaRecepcionPage />} />
@@ -52,6 +60,11 @@ export default function App() {
           <Route path="mis-solicitudes" element={<MisSolicitudesPage />} />
           <Route path="solicitudes" element={<SolicitudesPage />} />
           <Route path="solicitudes/:id" element={<SolicitudDetallePage />} />
+          <Route path="pyc" element={<PycEmpresasPage />} />
+          <Route path="pyc/:empresaId" element={<PycEmpresaDetallePage />} />
+          <Route path="pyc/:empresaId/reportes/nuevo" element={<PycReporteFormPage />} />
+          <Route path="pyc/:empresaId/reportes/:reporteId" element={<PycReporteDetallePage />} />
+          <Route path="pyc/:empresaId/reportes/:reporteId/editar" element={<PycReporteFormPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

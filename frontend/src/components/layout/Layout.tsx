@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Package, Users, Truck, Boxes, PackagePlus, PackageMinus, Undo2, ClipboardCheck, ClipboardList, ShoppingCart, LogOut, Menu, X, Search, AlertTriangle, Smartphone } from 'lucide-react'
+import { LayoutDashboard, Package, Users, Truck, Boxes, PackagePlus, PackageMinus, Undo2, ClipboardCheck, ClipboardList, ShoppingCart, LogOut, Menu, X, Search, AlertTriangle, Smartphone, CalendarCheck2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { Usuario } from '../../types'
 import api from '../../services/api'
@@ -17,6 +17,7 @@ interface Props {
     puedeOperar: boolean
     esAdmin: boolean
     esSolicitante: boolean
+    esContratista: boolean
   }
 }
 
@@ -49,10 +50,16 @@ export default function Layout({ auth }: Props) {
 
   // El solicitante solo necesita pedir material y ver el estado de lo que ya pidió — no tiene
   // acceso al resto del sistema (reforzado también en el backend, ver routes/*.js autorizar()).
+  // El contratista (empresa externa) solo ve y carga sus propios reportes diarios de P&C — no tiene
+  // acceso al resto de bodega (reforzado tambien en el backend, ver routes/pyc.js empresaPermitida()).
   const navItems = auth.esSolicitante
     ? [
         { to: '/solicitar', icon: ShoppingCart, label: 'Solicitar Material', exact: true },
         { to: '/mis-solicitudes', icon: ClipboardList, label: 'Mis Solicitudes' },
+      ]
+    : auth.esContratista
+    ? [
+        { to: `/pyc/${auth.usuario?.pyc_empresa_id}`, icon: CalendarCheck2, label: 'Programación y Control', exact: true },
       ]
     : [
         { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true },
@@ -63,6 +70,7 @@ export default function Layout({ auth }: Props) {
         { to: '/despachos', icon: PackageMinus, label: 'Despachos' },
         { to: '/devoluciones', icon: Undo2, label: 'Devoluciones' },
         { to: '/inventarios', icon: ClipboardCheck, label: 'Inventario' },
+        { to: '/pyc', icon: CalendarCheck2, label: 'P&C - Programación y Control' },
         ...(auth.esAdmin ? [{ to: '/usuarios', icon: Users, label: 'Usuarios' }] : []),
         { to: '/reportes/ncr', icon: AlertTriangle, label: 'NCR / Novedades' },
       ]
@@ -73,7 +81,7 @@ export default function Layout({ auth }: Props) {
     toast.success('Sesión cerrada')
   }
 
-  const rolLabel: Record<string, string> = { admin: 'Administrador', bodeguero: 'Bodeguero', visor: 'Visor' }
+  const rolLabel: Record<string, string> = { admin: 'Administrador', bodeguero: 'Bodeguero', visor: 'Visor', solicitante: 'Solicitante', contratista: 'Contratista' }
   const inicial = auth.usuario?.nombre?.charAt(0).toUpperCase() ?? '?'
 
   const itemClass = ({ isActive }: { isActive: boolean }) => `

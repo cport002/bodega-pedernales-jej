@@ -1,34 +1,36 @@
 import { useEffect, useState } from 'react'
 import api from '../services/api'
-import type { Usuario } from '../types'
+import type { Usuario, PycEmpresa } from '../types'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
 import { Plus, Edit2, Trash2, Users } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 
-const FORM_VACIO = { nombre: '', email: '', password: '', rol: 'bodeguero' as Usuario['rol'], activo: true }
-const ROL_LABEL: Record<string, string> = { admin: 'Administrador', bodeguero: 'Bodeguero', visor: 'Visor', solicitante: 'Solicitante' }
+const FORM_VACIO = { nombre: '', email: '', password: '', rol: 'bodeguero' as Usuario['rol'], activo: true, pyc_empresa_id: '' }
+const ROL_LABEL: Record<string, string> = { admin: 'Administrador', bodeguero: 'Bodeguero', visor: 'Visor', solicitante: 'Solicitante', contratista: 'Contratista (P&C)' }
 
 export default function UsuariosPage() {
   const { usuario: yo } = useAuth()
   const [usuarios, setUsuarios] = useState<Usuario[]>([])
+  const [empresasPyc, setEmpresasPyc] = useState<PycEmpresa[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editando, setEditando] = useState<Usuario | null>(null)
   const [form, setForm] = useState(FORM_VACIO)
 
   const cargar = () => { api.get('/usuarios').then(r => { setUsuarios(r.data); setLoading(false) }).catch(() => setLoading(false)) }
-  useEffect(() => { cargar() }, [])
+  useEffect(() => { cargar(); api.get('/pyc/empresas').then(r => setEmpresasPyc(r.data)).catch(() => {}) }, [])
 
   const abrirNuevo = () => { setEditando(null); setForm(FORM_VACIO); setShowForm(true) }
   const abrirEditar = (u: Usuario) => {
     setEditando(u)
-    setForm({ nombre: u.nombre, email: u.email, password: '', rol: u.rol, activo: u.activo === 1 })
+    setForm({ nombre: u.nombre, email: u.email, password: '', rol: u.rol, activo: u.activo === 1, pyc_empresa_id: u.pyc_empresa_id ? String(u.pyc_empresa_id) : '' })
     setShowForm(true)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (form.rol === 'contratista' && !form.pyc_empresa_id) { toast.error('Elige a qué empresa P&C pertenece este usuario'); return }
     try {
       if (editando) {
         const { email, ...payload } = form
@@ -137,6 +139,7 @@ export default function UsuariosPage() {
                     <option value="visor">Visor</option>
                     <option value="bodeguero">Bodeguero</option>
                     <option value="admin">Administrador</option>
+                    <option value="contratista">Contratista (P&C)</option>
                   </select>
                 </div>
                 <div>
@@ -144,6 +147,15 @@ export default function UsuariosPage() {
                   <input type="password" className="input" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required={!editando} />
                 </div>
               </div>
+              {form.rol === 'contratista' && (
+                <div>
+                  <label className="label">Empresa P&C *</label>
+                  <select className="input" value={form.pyc_empresa_id} onChange={e => setForm({ ...form, pyc_empresa_id: e.target.value })} required>
+                    <option value="">Selecciona una empresa...</option>
+                    {empresasPyc.map(emp => <option key={emp.id} value={emp.id}>{emp.nombre}</option>)}
+                  </select>
+                </div>
+              )}
               {editando && (
                 <div className="flex items-center gap-3">
                   <input type="checkbox" id="activo" checked={form.activo} onChange={e => setForm({ ...form, activo: e.target.checked })} />

@@ -129,8 +129,9 @@ CREATE INDEX IF NOT EXISTS idx_inventarios_lote ON inventarios(lote_id);
 -- Migracion: nuevo rol 'solicitante' (personal de terreno sin acceso previo al sistema, solo ve
 -- stock agregado por material y crea solicitudes, no aprueba ni despacha). ALTER TABLE porque el
 -- CHECK de una tabla que ya existe no se actualiza solo con CREATE TABLE IF NOT EXISTS.
-ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS usuarios_rol_check;
-ALTER TABLE usuarios ADD CONSTRAINT usuarios_rol_check CHECK(rol IN ('admin','bodeguero','visor','solicitante'));
+-- (El re-ensanche de este CHECK con el rol 'solicitante' quedo superado mas abajo, junto con el
+-- modulo P&C, que agrega 'contratista' al mismo constraint — no repetir aca con el set viejo, o en
+-- cada arranque se angosta el CHECK un instante y falla contra filas 'contratista' ya existentes.)
 
 -- Solicitudes: pedido de material GENERICO (no de un lote especifico) hecho por un solicitante de
 -- terreno. Queda 'pendiente' hasta que admin/bodeguero la revisa: puede ajustar la cantidad y recien
@@ -284,3 +285,94 @@ SELECT
   COALESCE((SELECT SUM(d.cantidad) FROM despachos d WHERE d.lote_id = l.id), 0) AS total_despachado,
   COALESCE((SELECT SUM(dv.cantidad) FROM devoluciones dv WHERE dv.lote_id = l.id), 0) AS total_devuelto
 FROM lotes l;
+
+-- ============================================================
+-- Modulo P&C (Programacion y Control): seguimiento de una empresa externa
+-- contratada para un servicio en terreno. El REPORTE DIARIO (dotacion,
+-- equipos, observaciones) es el dato atomico que carga la empresa, y las
+-- vistas semanal/mensual se calculan agregando reportes diarios ya
+-- guardados, en vez de mantenerse a mano en Excel. Fase 1: empresas,
+-- nomina/equipos (catalogo reutilizable dia a dia) y el reporte diario.
+-- La curva de avance (linea base vs real, HH ganadas por actividad) queda
+-- para una fase 2, una vez validado este primer flujo con datos reales.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS pyc_empresas (
+  id SERIAL PRIMARY KEY,
+  nombre TEXT NOT NULL UNIQUE,
+  contrato TEXT,
+  activa BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Nuevo rol para el representante de la empresa externa que carga sus propios
+-- reportes diarios, queda amarrado a una sola empresa via pyc_empresa_id (NULL
+-- para el resto de los roles, que no pertenecen a ninguna empresa externa).
+ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS usuarios_rol_check;
+ALTER TABLE usuarios ADD CONSTRAINT usuarios_rol_check CHECK(rol IN ('admin','bodeguero','visor','solicitante','contratista'));
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS pyc_empresa_id INTEGER REFERENCES pyc_empresas(id);
+
+CREATE TABLE IF NOT EXISTS pyc_personal (
+  id SERIAL PRIMARY KEY,
+  empresa_id INTEGER NOT NULL REFERENCES pyc_empresas(id),
+  nombre TEXT NOT NULL,
+  rut TEXT,
+  cargo TEXT,
+  turno TEXT,
+  tipo TEXT NOT NULL DEFAULT 'directo' CHECK(tipo IN ('directo','indirecto')),
+  activo BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pyc_personal_empresa ON pyc_personal(empresa_id);
+
+CREATE TABLE IF NOT EXISTS pyc_equipos (
+  id SERIAL PRIMARY KEY,
+  empresa_id INTEGER NOT NULL REFERENCES pyc_empresas(id),
+  nombre TEXT NOT NULL,
+  patente TEXT,
+  area_trabajo TEXT,
+  activo BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pyc_equipos_empresa ON pyc_equipos(empresa_id);
+
+-- Cabecera del reporte diario — un solo reporte por empresa y fecha (evita duplicados si alguien
+-- reenvia el mismo dia sin querer).
+CREATE TABLE IF NOT EXISTS pyc_reportes_diarios (
+  id SERIAL PRIMARY KEY,
+  empresa_id INTEGER NOT NULL REFERENCES pyc_empresas(id),
+  fecha DATE NOT NULL,
+  frente_destino TEXT,
+  observaciones_ssoma TEXT,
+  observaciones_generales TEXT,
+  creado_por INTEGER NOT NULL REFERENCES usuarios(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(empresa_id, fecha)
+);
+CREATE INDEX IF NOT EXISTS idx_pyc_reportes_empresa_fecha ON pyc_reportes_diarios(empresa_id, fecha DESC);
+
+CREATE TABLE IF NOT EXISTS pyc_asistencia (
+  id SERIAL PRIMARY KEY,
+  reporte_id INTEGER NOT NULL REFERENCES pyc_reportes_diarios(id) ON DELETE CASCADE,
+  personal_id INTEGER NOT NULL REFERENCES pyc_personal(id),
+  estado TEXT NOT NULL CHECK(estado IN ('presente','descanso','licencia','permiso','falta')),
+  hh NUMERIC NOT NULL DEFAULT 0,
+  UNIQUE(reporte_id, personal_id)
+);
+
+CREATE TABLE IF NOT EXISTS pyc_uso_equipos (
+  id SERIAL PRIMARY KEY,
+  reporte_id INTEGER NOT NULL REFERENCES pyc_reportes_diarios(id) ON DELETE CASCADE,
+  equipo_id INTEGER NOT NULL REFERENCES pyc_equipos(id),
+  disponible BOOLEAN NOT NULL DEFAULT true,
+  hh_operativas NUMERIC NOT NULL DEFAULT 0,
+  observaciones TEXT,
+  UNIQUE(reporte_id, equipo_id)
+);
+
+CREATE TABLE IF NOT EXISTS pyc_fotos (
+  id SERIAL PRIMARY KEY,
+  reporte_id INTEGER NOT NULL REFERENCES pyc_reportes_diarios(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

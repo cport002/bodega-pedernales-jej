@@ -2,8 +2,9 @@ export interface Usuario {
   id: number
   nombre: string
   email: string
-  rol: 'admin' | 'bodeguero' | 'visor' | 'solicitante'
+  rol: 'admin' | 'bodeguero' | 'visor' | 'solicitante' | 'contratista'
   activo?: number
+  pyc_empresa_id?: number | null
   created_at?: string
 }
 
@@ -252,4 +253,79 @@ export interface ResumenReportes {
   ncrAbiertos: number
   totalLotesInventariados: number
   totalLotesNoInventariados: number
+}
+
+// ---- Modulo P&C (Programacion y Control) ----
+
+export interface PycEmpresa {
+  id: number
+  nombre: string
+  contrato?: string | null
+  activa: boolean
+  created_at?: string
+}
+
+export interface PycPersonal {
+  id: number
+  empresa_id: number
+  nombre: string
+  rut?: string | null
+  cargo?: string | null
+  turno?: string | null
+  tipo: 'directo' | 'indirecto'
+  activo: boolean
+}
+
+export interface PycEquipo {
+  id: number
+  empresa_id: number
+  nombre: string
+  patente?: string | null
+  area_trabajo?: string | null
+  activo: boolean
+}
+
+export type PycEstadoAsistencia = 'presente' | 'descanso' | 'licencia' | 'permiso' | 'falta'
+
+export interface PycAsistencia {
+  id?: number
+  personal_id: number
+  personal_nombre?: string
+  rut?: string | null
+  cargo?: string | null
+  turno?: string | null
+  tipo?: 'directo' | 'indirecto'
+  estado: PycEstadoAsistencia
+  hh: number
+}
+
+export interface PycUsoEquipo {
+  id?: number
+  equipo_id: number
+  equipo_nombre?: string
+  patente?: string | null
+  area_trabajo?: string | null
+  disponible: boolean
+  hh_operativas: number
+  observaciones?: string | null
+}
+
+export interface PycFoto {
+  id: number
+  url: string
+}
+
+export interface PycReporteDiario {
+  id: number
+  empresa_id: number
+  fecha: string
+  frente_destino?: string | null
+  observaciones_ssoma?: string | null
+  observaciones_generales?: string | null
+  creado_por_nombre?: string
+  presentes?: number
+  hh_totales?: number
+  asistencia?: PycAsistencia[]
+  equipos?: PycUsoEquipo[]
+  fotos?: PycFoto[]
 }

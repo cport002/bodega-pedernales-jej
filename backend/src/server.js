@@ -17,6 +17,7 @@ const inventariosRoutes = require('./routes/inventarios');
 const reportesRoutes = require('./routes/reportes');
 const solicitudesRoutes = require('./routes/solicitudes');
 const notificacionesRoutes = require('./routes/notificaciones');
+const pycRoutes = require('./routes/pyc');
 
 const app = express();
 const PORT = process.env.PORT || 3007;
@@ -54,6 +55,7 @@ app.use('/api/inventarios', inventariosRoutes);
 app.use('/api/reportes', reportesRoutes);
 app.use('/api/solicitudes', solicitudesRoutes);
 app.use('/api/notificaciones', notificacionesRoutes);
+app.use('/api/pyc', pycRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', version: '1.0.0', timestamp: new Date().toISOString() }));
 

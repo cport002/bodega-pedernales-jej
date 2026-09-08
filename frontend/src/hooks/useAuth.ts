@@ -7,6 +7,7 @@ export function useAuth(): AuthState & {
   puedeOperar: boolean
   esAdmin: boolean
   esSolicitante: boolean
+  esContratista: boolean
 } {
   const [state, setState] = useState<AuthState>(() => ({
     token: localStorage.getItem('token'),
@@ -32,5 +33,6 @@ export function useAuth(): AuthState & {
     puedeOperar: state.usuario?.rol === 'admin' || state.usuario?.rol === 'bodeguero',
     esAdmin: state.usuario?.rol === 'admin',
     esSolicitante: state.usuario?.rol === 'solicitante',
+    esContratista: state.usuario?.rol === 'contratista',
   }
 }
