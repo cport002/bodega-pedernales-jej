@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import api, { fmt } from '../services/api'
 import type { PycEmpresa, PycPersonal, PycEquipo, PycReporteDiario } from '../types'
 import { useAuth } from '../hooks/useAuth'
-import { Building2, Plus, Users, Truck, CalendarDays, X, FileText } from 'lucide-react'
+import { Building2, Plus, Users, Truck, CalendarDays, X, FileText, Download, Upload } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import toast from 'react-hot-toast'
 
@@ -63,6 +63,8 @@ export default function PycEmpresaDetallePage() {
 
       {tab === 'reportes' && (
         <div className="space-y-4">
+          {puedeGestionar && <ImportarExcelCard empresaId={empresaId!} onImportado={cargarReportes} />}
+
           <div className="card flex flex-wrap items-end gap-4">
             <div className="min-w-[160px]">
               <label className="label">Desde</label>
@@ -113,6 +115,111 @@ export default function PycEmpresaDetallePage() {
 
       {tab === 'equipos' && (
         <EquiposTab empresaId={empresaId!} equipos={equipos} puedeGestionar={puedeGestionar} onCambio={cargarEquipos} />
+      )}
+    </div>
+  )
+}
+
+type ResultadoImportar = {
+  id: number; personalCargado: number; equiposCargados: number
+  estadosInvalidos: string[]; idsPersonalDesconocidos: number[]; idsEquiposDesconocidos: number[]
+}
+
+// Alternativa al formulario: la empresa externa ya suele trabajar en Excel, asi que puede descargar
+// una plantilla con su propia nomina/equipos precargados, marcar el estado del dia en esa misma
+// planilla, y subirla — evita retipear todo dentro del sistema si no quieren usar el formulario.
+function ImportarExcelCard({ empresaId, onImportado }: { empresaId: string; onImportado: () => void }) {
+  const navigate = useNavigate()
+  const [descargando, setDescargando] = useState(false)
+  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
+  const [frenteDestino, setFrenteDestino] = useState('')
+  const [archivo, setArchivo] = useState<File | null>(null)
+  const [cargando, setCargando] = useState(false)
+  const [resultado, setResultado] = useState<ResultadoImportar | null>(null)
+
+  const descargarPlantilla = async () => {
+    setDescargando(true)
+    try {
+      const r = await api.get(`/pyc/empresas/${empresaId}/reportes/plantilla`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([r.data]))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `plantilla_reporte_diario_empresa${empresaId}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      toast.error('Error al descargar la plantilla')
+    } finally { setDescargando(false) }
+  }
+
+  const importar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!archivo || !fecha) return
+    setCargando(true)
+    setResultado(null)
+    try {
+      const form = new FormData()
+      form.append('archivo', archivo)
+      form.append('fecha', fecha)
+      if (frenteDestino) form.append('frente_destino', frenteDestino)
+      const r = await api.post<ResultadoImportar>(`/pyc/empresas/${empresaId}/reportes/importar`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+      setResultado(r.data)
+      toast.success(`Reporte cargado: ${r.data.personalCargado} personas, ${r.data.equiposCargados} equipos`)
+      setArchivo(null)
+      onImportado()
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Error al cargar el archivo')
+    } finally { setCargando(false) }
+  }
+
+  return (
+    <div className="card space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h3>Cargar Reporte Diario desde Excel</h3>
+        <button type="button" onClick={descargarPlantilla} disabled={descargando} className="btn-secondary inline-flex items-center gap-2 disabled:opacity-60">
+          <Download className="w-4 h-4" /> {descargando ? 'Generando...' : 'Descargar Plantilla'}
+        </button>
+      </div>
+      <p className="text-xs text-gray-500">
+        La plantilla trae la nómina y los equipos ya cargados en el sistema — solo hay que marcar el estado/HH del día y volver a subirla acá. Útil si la empresa prefiere seguir trabajando en Excel en vez del formulario.
+      </p>
+      <form onSubmit={importar} className="flex flex-wrap items-end gap-4">
+        <div className="min-w-[160px]">
+          <label className="label">Fecha *</label>
+          <input type="date" className="input" value={fecha} onChange={e => setFecha(e.target.value)} required />
+        </div>
+        <div className="min-w-[200px]">
+          <label className="label">Frente / área</label>
+          <input className="input" value={frenteDestino} onChange={e => setFrenteDestino(e.target.value)} />
+        </div>
+        <div className="min-w-[240px]">
+          <label className="label">Archivo (.xlsx) *</label>
+          <input type="file" accept=".xlsx" className="input" onChange={e => setArchivo(e.target.files?.[0] || null)} required />
+        </div>
+        <button type="submit" disabled={cargando} className="btn-primary inline-flex items-center gap-2 disabled:opacity-60">
+          <Upload className="w-4 h-4" /> {cargando ? 'Cargando...' : 'Cargar Reporte'}
+        </button>
+      </form>
+
+      {resultado && (
+        <div className="text-sm bg-gray-50 rounded-xl p-4 space-y-1.5">
+          <p>
+            <span className="font-semibold text-green-700">{resultado.personalCargado}</span> persona(s) y{' '}
+            <span className="font-semibold text-green-700">{resultado.equiposCargados}</span> equipo(s) cargados —{' '}
+            <button type="button" onClick={() => navigate(`/pyc/${empresaId}/reportes/${resultado.id}`)} className="text-primary-600 font-medium underline">Ver reporte</button>
+          </p>
+          {resultado.estadosInvalidos.length > 0 && (
+            <p className="text-red-700">Estado no reconocido, se omitió: {resultado.estadosInvalidos.join('; ')}</p>
+          )}
+          {resultado.idsPersonalDesconocidos.length > 0 && (
+            <p className="text-red-700">ID de personal no encontrado en la nómina: {resultado.idsPersonalDesconocidos.join(', ')}</p>
+          )}
+          {resultado.idsEquiposDesconocidos.length > 0 && (
+            <p className="text-red-700">ID de equipo no encontrado en el catálogo: {resultado.idsEquiposDesconocidos.join(', ')}</p>
+          )}
+        </div>
       )}
     </div>
   )

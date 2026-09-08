@@ -1,9 +1,51 @@
 const express = require('express');
+const XLSX = require('xlsx');
 const { sql, withTransaction } = require('../database/db');
 const { autenticar, autorizar } = require('../middleware/auth');
-const { upload, urlArchivo } = require('../services/upload');
+const { upload, urlArchivo, uploadExcel } = require('../services/upload');
 
 const router = express.Router();
+
+// Crea la cabecera + asistencia + equipos de un reporte diario dentro de una transaccion ya abierta
+// — usado tanto por la carga manual (formulario) como por la carga vía plantilla Excel, para no
+// duplicar esta logica en dos lados.
+async function crearReporteDiario(tsql, { empresaId, fecha, frenteDestino, observacionesSsoma, observacionesGenerales, creadoPor, asistencia, equipos }) {
+  const r = await tsql(
+    `INSERT INTO pyc_reportes_diarios (empresa_id, fecha, frente_destino, observaciones_ssoma, observaciones_generales, creado_por)
+     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+    [empresaId, fecha, frenteDestino || null, observacionesSsoma || null, observacionesGenerales || null, creadoPor]
+  );
+  const id = r.rows[0].id;
+  for (const a of asistencia || []) {
+    if (!a.personal_id || !a.estado) continue;
+    await tsql('INSERT INTO pyc_asistencia (reporte_id, personal_id, estado, hh) VALUES (?, ?, ?, ?)',
+      [id, a.personal_id, a.estado, Number(a.hh) || 0]);
+  }
+  for (const e of equipos || []) {
+    if (!e.equipo_id) continue;
+    await tsql('INSERT INTO pyc_uso_equipos (reporte_id, equipo_id, disponible, hh_operativas, observaciones) VALUES (?, ?, ?, ?, ?)',
+      [id, e.equipo_id, e.disponible !== false, Number(e.hh_operativas) || 0, e.observaciones || null]);
+  }
+  return id;
+}
+
+// Columnas de la plantilla de descarga/carga de reporte diario — deben coincidir exactamente entre
+// /reportes/plantilla (las escribe) y /reportes/importar (las lee), es el contrato entre ambos.
+const COL_PERSONAL = {
+  id: 'ID', nombre: 'NOMBRE', rut: 'RUT', cargo: 'CARGO', turno: 'TURNO',
+  estado: 'ESTADO (presente / descanso / licencia / permiso / falta)', hh: 'HH'
+};
+const COL_EQUIPO = {
+  id: 'ID', nombre: 'EQUIPO', patente: 'PATENTE', area: 'AREA DE TRABAJO',
+  disponible: 'DISPONIBLE (SI / NO)', hh: 'HH OPERATIVAS', observaciones: 'OBSERVACIONES'
+};
+const ESTADOS_VALIDOS = ['presente', 'descanso', 'licencia', 'permiso', 'falta'];
+
+// Normaliza texto libre (tildes, mayusculas) para hacer el match de ESTADO mas tolerante a como
+// cada persona termine escribiendo en Excel.
+function normalizar(s) {
+  return String(s ?? '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
 
 // Un usuario "contratista" solo puede ver/operar la empresa a la que pertenece — el resto de los
 // roles (admin/bodeguero/visor) puede ver cualquier empresa. Se usa en cada ruta que recibe un
@@ -193,27 +235,126 @@ router.post('/empresas/:id/reportes', autenticar, autorizar('admin', 'bodeguero'
     const existe = (await sql('SELECT id FROM pyc_reportes_diarios WHERE empresa_id = ? AND fecha = ?', [req.params.id, fecha])).rows[0];
     if (existe) return res.status(409).json({ error: `Ya existe un reporte para el ${fecha}. Edítalo en vez de crear uno nuevo.` });
 
-    const reporteId = await withTransaction(async (tsql) => {
-      const r = await tsql(
-        `INSERT INTO pyc_reportes_diarios (empresa_id, fecha, frente_destino, observaciones_ssoma, observaciones_generales, creado_por)
-         VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
-        [req.params.id, fecha, frente_destino || null, observaciones_ssoma || null, observaciones_generales || null, req.usuario.id]
-      );
-      const id = r.rows[0].id;
-      for (const a of asistencia || []) {
-        if (!a.personal_id || !a.estado) continue;
-        await tsql('INSERT INTO pyc_asistencia (reporte_id, personal_id, estado, hh) VALUES (?, ?, ?, ?)',
-          [id, a.personal_id, a.estado, Number(a.hh) || 0]);
-      }
-      for (const e of equipos || []) {
-        if (!e.equipo_id) continue;
-        await tsql('INSERT INTO pyc_uso_equipos (reporte_id, equipo_id, disponible, hh_operativas, observaciones) VALUES (?, ?, ?, ?, ?)',
-          [id, e.equipo_id, e.disponible !== false, Number(e.hh_operativas) || 0, e.observaciones || null]);
-      }
-      return id;
-    });
+    const reporteId = await withTransaction((tsql) => crearReporteDiario(tsql, {
+      empresaId: req.params.id, fecha, frenteDestino: frente_destino, observacionesSsoma: observaciones_ssoma,
+      observacionesGenerales: observaciones_generales, creadoPor: req.usuario.id, asistencia, equipos
+    }));
 
     res.status(201).json({ id: reporteId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/pyc/empresas/:id/reportes/plantilla — descarga un .xlsx con el personal y equipos
+// activos de la empresa, listos para marcar ESTADO/HH y DISPONIBLE/HH OPERATIVAS del día y volver
+// a subirlo por POST /reportes/importar — para la empresa externa que ya trabaja en Excel, evita
+// tener que aprender a usar el formulario del sistema o retipear su propia nomina cada dia.
+router.get('/empresas/:id/reportes/plantilla', autenticar, autorizar('admin', 'bodeguero', 'visor', 'contratista'), async (req, res) => {
+  try {
+    if (!empresaPermitida(req, req.params.id)) return res.status(403).json({ error: 'Sin permisos para esta empresa' });
+
+    const personal = (await sql('SELECT * FROM pyc_personal WHERE empresa_id = ? AND activo = true ORDER BY tipo, nombre', [req.params.id])).rows;
+    const equipos = (await sql('SELECT * FROM pyc_equipos WHERE empresa_id = ? AND activo = true ORDER BY nombre', [req.params.id])).rows;
+
+    const filasPersonal = personal.map(p => ({
+      [COL_PERSONAL.id]: p.id, [COL_PERSONAL.nombre]: p.nombre, [COL_PERSONAL.rut]: p.rut || '',
+      [COL_PERSONAL.cargo]: p.cargo || '', [COL_PERSONAL.turno]: p.turno || '',
+      [COL_PERSONAL.estado]: 'presente', [COL_PERSONAL.hh]: 12
+    }));
+    const wsPersonal = XLSX.utils.json_to_sheet(filasPersonal);
+    wsPersonal['!cols'] = [{ wch: 6 }, { wch: 32 }, { wch: 14 }, { wch: 22 }, { wch: 10 }, { wch: 40 }, { wch: 8 }];
+
+    const filasEquipos = equipos.map(e => ({
+      [COL_EQUIPO.id]: e.id, [COL_EQUIPO.nombre]: e.nombre, [COL_EQUIPO.patente]: e.patente || '',
+      [COL_EQUIPO.area]: e.area_trabajo || '', [COL_EQUIPO.disponible]: 'SI', [COL_EQUIPO.hh]: 0, [COL_EQUIPO.observaciones]: ''
+    }));
+    const wsEquipos = XLSX.utils.json_to_sheet(filasEquipos);
+    wsEquipos['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 30 }];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsPersonal, 'Personal');
+    XLSX.utils.book_append_sheet(wb, wsEquipos, 'Equipos');
+
+    const instrucciones = XLSX.utils.aoa_to_sheet([
+      ['Cómo usar esta plantilla'],
+      ['1. No modificar la columna ID — es la que el sistema usa para identificar a cada persona/equipo al volver a cargar el archivo.'],
+      ['2. En la hoja Personal, marcar el ESTADO real del día de cada persona y sus HH trabajadas (ya viene marcado "presente" con 12 HH por defecto, solo cambiar las excepciones).'],
+      ['3. Estados válidos: presente, descanso, licencia, permiso, falta (no distingue mayúsculas/tildes).'],
+      ['4. En la hoja Equipos, marcar DISPONIBLE (SI/NO) y las HH OPERATIVAS de cada equipo.'],
+      ['5. No agregar ni quitar filas — si falta alguien en la nómina o un equipo en el catálogo, agrégalo antes en el sistema (pestañas Personal / Equipos) y vuelve a descargar la plantilla.'],
+      ['6. Subir este mismo archivo en P&C > Cargar Reporte Diario (Excel), indicando la fecha del día.'],
+    ]);
+    instrucciones['!cols'] = [{ wch: 110 }];
+    XLSX.utils.book_append_sheet(wb, instrucciones, 'Instrucciones');
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="plantilla_reporte_diario_empresa${req.params.id}.xlsx"`);
+    res.send(buffer);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/pyc/empresas/:id/reportes/importar — multipart: archivo (.xlsx de /reportes/plantilla
+// ya llenado), fecha, frente_destino/observaciones_ssoma/observaciones_generales (opcionales).
+router.post('/empresas/:id/reportes/importar', autenticar, autorizar('admin', 'bodeguero', 'contratista'), uploadExcel.single('archivo'), async (req, res) => {
+  try {
+    if (!empresaPermitida(req, req.params.id)) return res.status(403).json({ error: 'Sin permisos para esta empresa' });
+    const { fecha, frente_destino, observaciones_ssoma, observaciones_generales } = req.body;
+    if (!req.file) return res.status(400).json({ error: 'Archivo .xlsx requerido' });
+    if (!fecha) return res.status(400).json({ error: 'La fecha es requerida' });
+
+    const existe = (await sql('SELECT id FROM pyc_reportes_diarios WHERE empresa_id = ? AND fecha = ?', [req.params.id, fecha])).rows[0];
+    if (existe) return res.status(409).json({ error: `Ya existe un reporte para el ${fecha}. Edítalo en vez de crear uno nuevo.` });
+
+    const idsPersonal = new Set((await sql('SELECT id FROM pyc_personal WHERE empresa_id = ?', [req.params.id])).rows.map(r => r.id));
+    const idsEquipos = new Set((await sql('SELECT id FROM pyc_equipos WHERE empresa_id = ?', [req.params.id])).rows.map(r => r.id));
+
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const wsPersonal = wb.Sheets['Personal'];
+    const wsEquipos = wb.Sheets['Equipos'];
+    if (!wsPersonal || !wsEquipos) return res.status(400).json({ error: 'El archivo no tiene el formato esperado (hojas "Personal" y "Equipos") — descarga la plantilla desde este mismo módulo.' });
+
+    const filasPersonal = XLSX.utils.sheet_to_json(wsPersonal, { defval: null });
+    const filasEquipos = XLSX.utils.sheet_to_json(wsEquipos, { defval: null });
+
+    const asistencia = [];
+    const estadosInvalidos = [];
+    const idsPersonalDesconocidos = [];
+    for (const fila of filasPersonal) {
+      const id = Number(fila[COL_PERSONAL.id]);
+      if (!id) continue;
+      if (!idsPersonal.has(id)) { idsPersonalDesconocidos.push(id); continue; }
+      const estadoTexto = normalizar(fila[COL_PERSONAL.estado]);
+      const estado = ESTADOS_VALIDOS.includes(estadoTexto) ? estadoTexto : (estadoTexto ? null : 'presente');
+      if (!estado) { estadosInvalidos.push(`ID ${id}: "${fila[COL_PERSONAL.estado]}"`); continue; }
+      const hh = estado === 'presente' ? (Number(fila[COL_PERSONAL.hh]) || 0) : 0;
+      asistencia.push({ personal_id: id, estado, hh });
+    }
+
+    const equipos = [];
+    const idsEquiposDesconocidos = [];
+    for (const fila of filasEquipos) {
+      const id = Number(fila[COL_EQUIPO.id]);
+      if (!id) continue;
+      if (!idsEquipos.has(id)) { idsEquiposDesconocidos.push(id); continue; }
+      const disponibleTexto = normalizar(fila[COL_EQUIPO.disponible]);
+      const disponible = !['no', 'n'].includes(disponibleTexto);
+      equipos.push({
+        equipo_id: id, disponible, hh_operativas: Number(fila[COL_EQUIPO.hh]) || 0,
+        observaciones: fila[COL_EQUIPO.observaciones] ? String(fila[COL_EQUIPO.observaciones]).trim() : null
+      });
+    }
+
+    if (asistencia.length === 0) return res.status(400).json({ error: 'La hoja Personal no tiene filas válidas para cargar' });
+
+    const reporteId = await withTransaction((tsql) => crearReporteDiario(tsql, {
+      empresaId: req.params.id, fecha, frenteDestino: frente_destino, observacionesSsoma: observaciones_ssoma,
+      observacionesGenerales: observaciones_generales, creadoPor: req.usuario.id, asistencia, equipos
+    }));
+
+    res.status(201).json({
+      id: reporteId, personalCargado: asistencia.length, equiposCargados: equipos.length,
+      estadosInvalidos, idsPersonalDesconocidos, idsEquiposDesconocidos
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
