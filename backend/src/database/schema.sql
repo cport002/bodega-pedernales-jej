@@ -215,6 +215,56 @@ ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS eliminada BOOLEAN NOT NULL DEFA
 ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS eliminada_por INTEGER REFERENCES usuarios(id);
 ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS fecha_eliminacion TIMESTAMPTZ;
 
+-- Migracion: de "1 solicitud = 1 material" a "1 pedido = varios materiales", pedido explicito del
+-- usuario (queria poder pedir mas de un material de una vez, con un solo vale). La tabla
+-- `solicitudes` pasa a ser el PEDIDO (folio, frente, estado, solicitante, fechas) y ya no lleva
+-- material_id/cantidad directo — eso se mueve a la tabla nueva `pedido_items`, una fila por
+-- material dentro del pedido. Las columnas viejas material_id/cantidad_solicitada/cantidad_aprobada
+-- de `solicitudes` NO se borran (evita tener que reescribir datos reales ya cargados) — quedan sin
+-- usar por el codigo nuevo, solo sirven de respaldo historico de como era antes de este cambio.
+-- Se les quita el NOT NULL porque un pedido nuevo multi-item no llena estas columnas.
+ALTER TABLE solicitudes ALTER COLUMN material_id DROP NOT NULL;
+ALTER TABLE solicitudes ALTER COLUMN cantidad_solicitada DROP NOT NULL;
+
+CREATE TABLE IF NOT EXISTS pedido_items (
+  id SERIAL PRIMARY KEY,
+  pedido_id INTEGER NOT NULL REFERENCES solicitudes(id),
+  material_id INTEGER NOT NULL REFERENCES materiales(id),
+  cantidad_solicitada NUMERIC NOT NULL CHECK(cantidad_solicitada > 0),
+  cantidad_aprobada NUMERIC
+);
+CREATE INDEX IF NOT EXISTS idx_pedido_items_pedido ON pedido_items(pedido_id);
+CREATE INDEX IF NOT EXISTS idx_pedido_items_material ON pedido_items(material_id);
+
+-- Migra hacia adelante cada solicitud vieja (1 material directo en la fila) a su item equivalente
+-- en pedido_items — corre en cada arranque pero no hace nada una vez migrado (WHERE NOT EXISTS),
+-- es seguro repetirlo indefinidamente.
+INSERT INTO pedido_items (pedido_id, material_id, cantidad_solicitada, cantidad_aprobada)
+SELECT s.id, s.material_id, s.cantidad_solicitada, s.cantidad_aprobada
+FROM solicitudes s
+WHERE s.material_id IS NOT NULL
+AND NOT EXISTS (SELECT 1 FROM pedido_items pi WHERE pi.pedido_id = s.id);
+
+-- Lotes/cantidad decididos al aprobar CADA item del pedido (antes era por solicitud completa,
+-- ahora es por item porque cada material del pedido puede salir de lotes distintos).
+ALTER TABLE solicitud_lotes_aprobados ADD COLUMN IF NOT EXISTS pedido_item_id INTEGER REFERENCES pedido_items(id);
+CREATE INDEX IF NOT EXISTS idx_sla_item ON solicitud_lotes_aprobados(pedido_item_id);
+
+-- Migra las asignaciones viejas (ligadas a solicitud_id, de cuando 1 solicitud = 1 item) a su
+-- pedido_item equivalente — mismo criterio idempotente que arriba.
+UPDATE solicitud_lotes_aprobados sla
+SET pedido_item_id = (SELECT pi.id FROM pedido_items pi WHERE pi.pedido_id = sla.solicitud_id LIMIT 1)
+WHERE sla.pedido_item_id IS NULL AND sla.solicitud_id IS NOT NULL;
+
+-- Idem para despachos: antes bastaba con saber a que solicitud pertenecia (un solo material);
+-- ahora hace falta saber a que item especifico del pedido pertenece cada despacho.
+ALTER TABLE despachos ADD COLUMN IF NOT EXISTS pedido_item_id INTEGER REFERENCES pedido_items(id);
+CREATE INDEX IF NOT EXISTS idx_despachos_item ON despachos(pedido_item_id);
+
+UPDATE despachos d
+SET pedido_item_id = (SELECT pi.id FROM pedido_items pi WHERE pi.pedido_id = d.solicitud_id LIMIT 1)
+WHERE d.pedido_item_id IS NULL AND d.solicitud_id IS NOT NULL;
+
 -- El stock ya no se calcula siempre desde la recepcion original: si el lote tiene al menos una
 -- auditoria de inventario registrada, el conteo mas reciente pasa a ser la base ("verdad" fisica
 -- confirmada), y solo se le suman/restan los despachos/devoluciones ocurridos DESPUES de esa fecha.

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import api, { fmt, dataURLtoBlob, descargarBlob, comprimirFoto } from '../services/api'
-import type { Solicitud } from '../types'
+import type { Solicitud, Material } from '../types'
 import type SignatureCanvas from 'react-signature-canvas'
 import toast from 'react-hot-toast'
-import { ClipboardList, FileText, X, Download, QrCode, Truck, Pencil, Trash2, AlertTriangle } from 'lucide-react'
+import { ClipboardList, FileText, X, Download, QrCode, Truck, Pencil, Trash2, AlertTriangle, Plus, Package } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import FirmaCanvas from '../components/FirmaCanvas'
 import { useAuth } from '../hooks/useAuth'
@@ -13,20 +13,22 @@ const ESTADO_BADGE: Record<string, string> = { pendiente: 'badge-amber', aprobad
 const ESTADO_LABEL: Record<string, string> = { pendiente: 'Pendiente', aprobada: 'Vale emitido — pendiente de retiro', entregada: 'Entregada', rechazada: 'Rechazada' }
 
 type Asignacion = { checked: boolean; cantidad: string }
+type MaterialConStock = Material & { stock_total: number }
+type ItemEditable = { id?: number; material_id: number; material_descripcion: string; unidad: string; cantidad: string }
 
 export default function SolicitudDetallePage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { puedeOperar, usuario } = useAuth()
   const [solicitud, setSolicitud] = useState<Solicitud | null>(null)
-  const [asignaciones, setAsignaciones] = useState<Record<number, Asignacion>>({})
+  // asignaciones[pedido_item_id][lote_id] = {checked, cantidad}
+  const [asignaciones, setAsignaciones] = useState<Record<number, Record<number, Asignacion>>>({})
   const [frenteDestino, setFrenteDestino] = useState('')
   const [formEntrega, setFormEntrega] = useState({ retirado_por: '', observaciones: '' })
   const [guardando, setGuardando] = useState(false)
   const [showRechazar, setShowRechazar] = useState(false)
   const [motivoRechazo, setMotivoRechazo] = useState('')
   const [showEditar, setShowEditar] = useState(false)
-  const [formEditar, setFormEditar] = useState({ cantidad: '', frente_destino: '', observaciones: '' })
   const [showEliminar, setShowEliminar] = useState(false)
 
   const sigRef = useRef<SignatureCanvas | null>(null)
@@ -40,23 +42,37 @@ export default function SolicitudDetallePage() {
   }
   useEffect(() => { cargar() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggleLote = (loteId: number, checked: boolean) => {
-    setAsignaciones(prev => ({ ...prev, [loteId]: { checked, cantidad: prev[loteId]?.cantidad || '' } }))
+  const toggleLote = (itemId: number, loteId: number, checked: boolean) => {
+    setAsignaciones(prev => ({
+      ...prev,
+      [itemId]: { ...prev[itemId], [loteId]: { checked, cantidad: prev[itemId]?.[loteId]?.cantidad || '' } }
+    }))
   }
-  const setCantidadLote = (loteId: number, cantidad: string) => {
-    setAsignaciones(prev => ({ ...prev, [loteId]: { checked: prev[loteId]?.checked ?? true, cantidad } }))
+  const setCantidadLote = (itemId: number, loteId: number, cantidad: string) => {
+    setAsignaciones(prev => ({
+      ...prev,
+      [itemId]: { ...prev[itemId], [loteId]: { checked: prev[itemId]?.[loteId]?.checked ?? true, cantidad } }
+    }))
   }
 
   const handleAprobar = async (e: React.FormEvent) => {
     e.preventDefault()
-    const elegidos = Object.entries(asignaciones)
-      .filter(([, a]) => a.checked && Number(a.cantidad) > 0)
-      .map(([loteId, a]) => ({ lote_id: Number(loteId), cantidad: Number(a.cantidad) }))
-    if (elegidos.length === 0) { toast.error('Marca al menos un lote y una cantidad'); return }
+    const items = (solicitud?.items || []).map(item => {
+      const elegidos = Object.entries(asignaciones[item.id] || {})
+        .filter(([, a]) => a.checked && Number(a.cantidad) > 0)
+        .map(([loteId, a]) => ({ lote_id: Number(loteId), cantidad: Number(a.cantidad) }))
+      return { pedido_item_id: item.id, asignaciones: elegidos }
+    })
+    if (items.every(i => i.asignaciones.length === 0)) { toast.error('Marca al menos un lote y una cantidad'); return }
+    const sinAsignar = (solicitud?.items || []).filter(item => !items.find(i => i.pedido_item_id === item.id)?.asignaciones.length)
+    if (sinAsignar.length > 0) {
+      toast.error(`Falta elegir lote para: ${sinAsignar.map(i => i.material_descripcion).join(', ')}`)
+      return
+    }
 
     setGuardando(true)
     try {
-      const r = await api.post(`/solicitudes/${id}/aprobar`, { asignaciones: elegidos, frente_destino: frenteDestino || null })
+      const r = await api.post(`/solicitudes/${id}/aprobar`, { items, frente_destino: frenteDestino || null })
       toast.success(`Vale ${r.data.folio} generado — el solicitante ya puede descargarlo`)
       cargar()
     } catch (err: any) {
@@ -74,33 +90,6 @@ export default function SolicitudDetallePage() {
       cargar()
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Error al rechazar la solicitud')
-    } finally { setGuardando(false) }
-  }
-
-  const abrirEditar = () => {
-    if (!solicitud) return
-    setFormEditar({
-      cantidad: String(solicitud.cantidad_solicitada),
-      frente_destino: solicitud.frente_destino || '',
-      observaciones: solicitud.observaciones || '',
-    })
-    setShowEditar(true)
-  }
-
-  const handleEditar = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setGuardando(true)
-    try {
-      await api.put(`/solicitudes/${id}`, {
-        cantidad: Number(formEditar.cantidad),
-        frente_destino: formEditar.frente_destino || null,
-        observaciones: formEditar.observaciones || null,
-      })
-      toast.success('Solicitud actualizada')
-      setShowEditar(false)
-      cargar()
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Error al editar la solicitud')
     } finally { setGuardando(false) }
   }
 
@@ -151,18 +140,18 @@ export default function SolicitudDetallePage() {
 
   if (!solicitud) return <div className="flex items-center justify-center h-32 text-gray-500">Cargando...</div>
 
-  const totalAsignado = Object.values(asignaciones).filter(a => a.checked).reduce((acc, a) => acc + (Number(a.cantidad) || 0), 0)
   const esDueno = usuario?.id === solicitud.solicitante_id
   const puedeEditar = solicitud.estado === 'pendiente' && (puedeOperar || esDueno)
   const puedeEliminar = solicitud.estado !== 'entregada' && (puedeOperar || esDueno)
+  const items = solicitud.items || []
 
   return (
     <div className="space-y-6">
-      <PageHeader title={`Solicitud #${solicitud.id}`} subtitle={solicitud.material_descripcion} icon={ClipboardList}
+      <PageHeader title={`Solicitud #${solicitud.id}`} subtitle={`${items.length} material${items.length !== 1 ? 'es' : ''}`} icon={ClipboardList}
         actions={
           <>
             {puedeEditar && (
-              <button onClick={abrirEditar} className="inline-flex items-center gap-2 bg-white text-primary-700 font-semibold text-sm px-4 py-2 rounded-xl hover:bg-primary-50 transition-colors shadow-sm">
+              <button onClick={() => setShowEditar(true)} className="inline-flex items-center gap-2 bg-white text-primary-700 font-semibold text-sm px-4 py-2 rounded-xl hover:bg-primary-50 transition-colors shadow-sm">
                 <Pencil className="w-4 h-4" /> Editar
               </button>
             )}
@@ -177,8 +166,6 @@ export default function SolicitudDetallePage() {
       <div className="card grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <div><p className="label mb-0.5">Solicitante</p><p className="font-medium text-gray-800">{solicitud.solicitante_nombre}</p></div>
         <div><p className="label mb-0.5">Fecha</p><p className="font-medium text-gray-800">{fmt.fechaHora(solicitud.fecha_solicitud)}</p></div>
-        <div><p className="label mb-0.5">Cantidad solicitada</p><p className="font-bold text-primary-700 text-lg">{fmt.num(solicitud.cantidad_solicitada)} {solicitud.unidad}</p></div>
-        <div><p className="label mb-0.5">Stock disponible hoy</p><p className="font-medium text-gray-800">{fmt.num(solicitud.stock_disponible_actual || 0)} {solicitud.unidad}</p></div>
         <div><p className="label mb-0.5">Frente / equipo destino</p><p className="font-medium text-gray-800">{solicitud.frente_destino || '-'}</p></div>
         <div><p className="label mb-0.5">Observaciones</p><p className="font-medium text-gray-800">{solicitud.observaciones || '-'}</p></div>
         <div>
@@ -197,6 +184,31 @@ export default function SolicitudDetallePage() {
         {solicitud.estado === 'rechazada' && solicitud.motivo_rechazo && (
           <div className="col-span-full"><p className="label mb-0.5">Motivo de rechazo</p><p className="font-medium text-red-700">{solicitud.motivo_rechazo}</p></div>
         )}
+      </div>
+
+      {/* Lista simple de materiales pedidos — visible siempre como referencia */}
+      <div className="card p-0 overflow-hidden overflow-x-auto">
+        <div className="p-4 border-b border-gray-100"><h3>Materiales del pedido</h3></div>
+        <table className="w-full">
+          <thead className="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th className="table-header">Material</th>
+              <th className="table-header text-right">Cant. solicitada</th>
+              <th className="table-header text-right">Cant. aprobada</th>
+              <th className="table-header text-right">Stock disponible hoy</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map(item => (
+              <tr key={item.id} className="table-row">
+                <td className="table-cell font-medium">{item.material_descripcion}</td>
+                <td className="table-cell text-right tabular-nums">{fmt.num(item.cantidad_solicitada)} {item.unidad}</td>
+                <td className="table-cell text-right tabular-nums">{item.cantidad_aprobada != null ? `${fmt.num(item.cantidad_aprobada)} ${item.unidad}` : '-'}</td>
+                <td className="table-cell text-right tabular-nums">{fmt.num(item.stock_disponible_actual || 0)} {item.unidad}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       {solicitud.estado === 'aprobada' && (
@@ -224,6 +236,7 @@ export default function SolicitudDetallePage() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
+                <th className="table-header">Material</th>
                 <th className="table-header">Lote</th>
                 <th className="table-header text-right">Cantidad</th>
                 <th className="table-header">Fecha</th>
@@ -233,8 +246,9 @@ export default function SolicitudDetallePage() {
             <tbody>
               {solicitud.despachos?.map(d => (
                 <tr key={d.id} className="table-row">
+                  <td className="table-cell">{d.material_descripcion}</td>
                   <td className="table-cell"><Link to={`/lotes/${d.lote_id}`} className="font-medium text-primary-600">{d.lote_codigo}</Link></td>
-                  <td className="table-cell text-right tabular-nums">{fmt.num(d.cantidad)} {solicitud.unidad}</td>
+                  <td className="table-cell text-right tabular-nums">{fmt.num(d.cantidad)} {d.unidad}</td>
                   <td className="table-cell">{fmt.fechaHora(d.fecha)}</td>
                   <td className="table-cell text-center">
                     <button onClick={() => verPdf(d.id)} className="text-gray-400 hover:text-primary-600 inline-block">
@@ -249,52 +263,56 @@ export default function SolicitudDetallePage() {
       )}
 
       {solicitud.estado === 'pendiente' && puedeOperar && (
-        <form onSubmit={handleAprobar} className="card space-y-4">
-          <h3>Elegir lote(s) y cantidad para el vale</h3>
-          <div className="border border-gray-200 rounded-xl overflow-hidden overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="table-header w-10"></th>
-                  <th className="table-header">Lote</th>
-                  <th className="table-header">Ubicación</th>
-                  <th className="table-header text-right">Stock lote</th>
-                  <th className="table-header text-right w-40">Cantidad a sacar</th>
-                </tr>
-              </thead>
-              <tbody>
-                {solicitud.lotes_disponibles?.map(l => {
-                  const a = asignaciones[l.id]
-                  return (
-                    <tr key={l.id} className="table-row">
-                      <td className="table-cell"><input type="checkbox" checked={!!a?.checked} onChange={e => toggleLote(l.id, e.target.checked)} /></td>
-                      <td className="table-cell font-medium">{l.codigo}{l.pallet_numero ? ` · Pallet ${l.pallet_numero}` : ''}</td>
-                      <td className="table-cell">{[l.ubicacion_1, l.ubicacion_2].filter(Boolean).join(' / ') || '-'}</td>
-                      <td className="table-cell text-right tabular-nums">{fmt.num(l.stock_actual)}</td>
-                      <td className="table-cell text-right">
-                        <input type="number" min={0.01} max={l.stock_actual} step="0.01" className="input text-right"
-                          value={a?.cantidad || ''} onChange={e => setCantidadLote(l.id, e.target.value)} />
-                      </td>
+        <form onSubmit={handleAprobar} className="space-y-4">
+          {items.map(item => (
+            <div key={item.id} className="card space-y-3">
+              <h3>{item.material_descripcion} <span className="text-gray-400 font-normal text-sm">— pedido: {fmt.num(item.cantidad_solicitada)} {item.unidad}</span></h3>
+              <div className="border border-gray-200 rounded-xl overflow-hidden overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="table-header w-10"></th>
+                      <th className="table-header">Lote</th>
+                      <th className="table-header">Ubicación</th>
+                      <th className="table-header text-right">Stock lote</th>
+                      <th className="table-header text-right w-40">Cantidad a sacar</th>
                     </tr>
-                  )
-                })}
-                {(!solicitud.lotes_disponibles || solicitud.lotes_disponibles.length === 0) && (
-                  <tr><td colSpan={5} className="table-cell text-center text-gray-400 py-6">Sin stock disponible en ningún lote de este material</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-sm text-gray-500">Total a asignar: <strong>{fmt.num(totalAsignado)} {solicitud.unidad}</strong> (pedido: {fmt.num(solicitud.cantidad_solicitada)} {solicitud.unidad})</p>
-          <p className="text-xs text-gray-400">El stock recién se descuenta al confirmar la entrega física en bodega, no ahora.</p>
+                  </thead>
+                  <tbody>
+                    {item.lotes_disponibles?.map(l => {
+                      const a = asignaciones[item.id]?.[l.id]
+                      return (
+                        <tr key={l.id} className="table-row">
+                          <td className="table-cell"><input type="checkbox" checked={!!a?.checked} onChange={e => toggleLote(item.id, l.id, e.target.checked)} /></td>
+                          <td className="table-cell font-medium">{l.codigo}{l.pallet_numero ? ` · Pallet ${l.pallet_numero}` : ''}</td>
+                          <td className="table-cell">{[l.ubicacion_1, l.ubicacion_2].filter(Boolean).join(' / ') || '-'}</td>
+                          <td className="table-cell text-right tabular-nums">{fmt.num(l.stock_actual)}</td>
+                          <td className="table-cell text-right">
+                            <input type="number" min={0.01} max={l.stock_actual} step="0.01" className="input text-right"
+                              value={a?.cantidad || ''} onChange={e => setCantidadLote(item.id, l.id, e.target.value)} />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                    {(!item.lotes_disponibles || item.lotes_disponibles.length === 0) && (
+                      <tr><td colSpan={5} className="table-cell text-center text-gray-400 py-6">Sin stock disponible en ningún lote de este material</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
 
-          <div>
-            <label className="label">Frente / equipo destino</label>
-            <input className="input" value={frenteDestino} onChange={e => setFrenteDestino(e.target.value)} />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" className="btn-secondary" onClick={() => setShowRechazar(true)}>Rechazar</button>
-            <button type="submit" disabled={guardando} className="btn-primary">{guardando ? 'Guardando...' : 'Aprobar y Generar Vale'}</button>
+          <div className="card space-y-4">
+            <p className="text-xs text-gray-400">El stock recién se descuenta al confirmar la entrega física en bodega, no ahora.</p>
+            <div>
+              <label className="label">Frente / equipo destino</label>
+              <input className="input" value={frenteDestino} onChange={e => setFrenteDestino(e.target.value)} />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button type="button" className="btn-secondary" onClick={() => setShowRechazar(true)}>Rechazar</button>
+              <button type="submit" disabled={guardando} className="btn-primary">{guardando ? 'Guardando...' : 'Aprobar y Generar Vale'}</button>
+            </div>
           </div>
         </form>
       )}
@@ -305,25 +323,27 @@ export default function SolicitudDetallePage() {
             <Truck className="w-4 h-4 text-primary-600" />
             <h3>Confirmar Entrega Física</h3>
           </div>
-          <p className="text-xs text-gray-500 -mt-2">Al confirmar se descuenta el stock de los lotes del vale y se genera el despacho.</p>
+          <p className="text-xs text-gray-500 -mt-2">Al confirmar se descuenta el stock de los lotes del vale y se genera un despacho por cada material.</p>
 
           <div className="border border-gray-200 rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
+                  <th className="table-header">Material</th>
                   <th className="table-header">Lote</th>
                   <th className="table-header">Ubicación</th>
                   <th className="table-header text-right">Cantidad a entregar</th>
                 </tr>
               </thead>
               <tbody>
-                {solicitud.lotes_aprobados?.map(l => (
-                  <tr key={l.lote_id} className="table-row">
-                    <td className="table-cell font-medium">{l.lote_codigo}{l.pallet_numero ? ` · Pallet ${l.pallet_numero}` : ''}</td>
+                {items.flatMap(item => (item.lotes_aprobados || []).map(l => (
+                  <tr key={`${item.id}-${l.lote_id}`} className="table-row">
+                    <td className="table-cell font-medium">{item.material_descripcion}</td>
+                    <td className="table-cell">{l.lote_codigo}{l.pallet_numero ? ` · Pallet ${l.pallet_numero}` : ''}</td>
                     <td className="table-cell">{[l.ubicacion_1, l.ubicacion_2].filter(Boolean).join(' / ') || '-'}</td>
-                    <td className="table-cell text-right tabular-nums font-semibold">{fmt.num(l.cantidad)} {solicitud.unidad}</td>
+                    <td className="table-cell text-right tabular-nums font-semibold">{fmt.num(l.cantidad)} {item.unidad}</td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
           </div>
@@ -375,33 +395,11 @@ export default function SolicitudDetallePage() {
       )}
 
       {showEditar && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-              <h2>Editar solicitud</h2>
-              <button onClick={() => setShowEditar(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-            </div>
-            <form onSubmit={handleEditar} className="p-6 space-y-4">
-              <div>
-                <label className="label">Cantidad ({solicitud.unidad}) *</label>
-                <input type="number" min={0.01} step="0.01" required className="input"
-                  value={formEditar.cantidad} onChange={e => setFormEditar({ ...formEditar, cantidad: e.target.value })} />
-              </div>
-              <div>
-                <label className="label">Frente / equipo destino</label>
-                <input className="input" value={formEditar.frente_destino} onChange={e => setFormEditar({ ...formEditar, frente_destino: e.target.value })} />
-              </div>
-              <div>
-                <label className="label">Observaciones</label>
-                <input className="input" value={formEditar.observaciones} onChange={e => setFormEditar({ ...formEditar, observaciones: e.target.value })} />
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" className="btn-secondary" onClick={() => setShowEditar(false)}>Cancelar</button>
-                <button type="submit" disabled={guardando} className="btn-primary">{guardando ? 'Guardando...' : 'Guardar Cambios'}</button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <EditarPedidoModal
+          solicitud={solicitud}
+          onClose={() => setShowEditar(false)}
+          onGuardado={() => { setShowEditar(false); cargar() }}
+        />
       )}
 
       {showEliminar && (
@@ -413,7 +411,7 @@ export default function SolicitudDetallePage() {
             </div>
             <div className="p-6 space-y-4">
               <p className="text-sm text-gray-700">
-                ¿Seguro que quieres eliminar la solicitud de <strong>{fmt.num(solicitud.cantidad_solicitada)} {solicitud.unidad}</strong> de <strong>{solicitud.material_descripcion}</strong>?
+                ¿Seguro que quieres eliminar este pedido de <strong>{items.length} material{items.length !== 1 ? 'es' : ''}</strong>?
               </p>
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 Esta acción no se puede deshacer desde el sistema — dejará de aparecer en los listados. El registro queda guardado internamente para auditoría.
@@ -429,6 +427,116 @@ export default function SolicitudDetallePage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// Modal de edición del pedido completo: permite ajustar cantidades, quitar materiales, y agregar
+// materiales nuevos (mismo buscador que al crear el pedido) — todo mientras siga 'pendiente'.
+function EditarPedidoModal({ solicitud, onClose, onGuardado }: { solicitud: Solicitud; onClose: () => void; onGuardado: () => void }) {
+  const [items, setItems] = useState<ItemEditable[]>(
+    (solicitud.items || []).map(i => ({ id: i.id, material_id: i.material_id, material_descripcion: i.material_descripcion, unidad: i.unidad, cantidad: String(i.cantidad_solicitada) }))
+  )
+  const [frenteDestino, setFrenteDestino] = useState(solicitud.frente_destino || '')
+  const [observaciones, setObservaciones] = useState(solicitud.observaciones || '')
+  const [busqueda, setBusqueda] = useState('')
+  const [resultados, setResultados] = useState<MaterialConStock[]>([])
+  const [guardando, setGuardando] = useState(false)
+
+  useEffect(() => {
+    if (!busqueda) { setResultados([]); return }
+    const t = setTimeout(() => {
+      api.get('/materiales', { params: { busqueda, estado: 'activo' } }).then(r => setResultados(r.data)).catch(() => {})
+    }, 350)
+    return () => clearTimeout(t)
+  }, [busqueda])
+
+  const agregarMaterial = (m: MaterialConStock) => {
+    if (items.some(i => i.material_id === m.id)) { toast.error('Ese material ya está en el pedido'); return }
+    setItems(prev => [...prev, { material_id: m.id, material_descripcion: m.descripcion, unidad: m.unidad, cantidad: '1' }])
+    setBusqueda('')
+    setResultados([])
+  }
+
+  const quitarItem = (idx: number) => setItems(prev => prev.filter((_, i) => i !== idx))
+  const cambiarCantidad = (idx: number, cantidad: string) => setItems(prev => prev.map((it, i) => i === idx ? { ...it, cantidad } : it))
+
+  const guardar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (items.length === 0) { toast.error('El pedido debe tener al menos un material'); return }
+    for (const it of items) {
+      if (!Number(it.cantidad) || Number(it.cantidad) <= 0) { toast.error(`Cantidad inválida para ${it.material_descripcion}`); return }
+    }
+    setGuardando(true)
+    try {
+      await api.put(`/solicitudes/${solicitud.id}`, {
+        items: items.map(it => ({ id: it.id, material_id: it.material_id, cantidad: Number(it.cantidad) })),
+        frente_destino: frenteDestino, observaciones,
+      })
+      toast.success('Pedido actualizado')
+      onGuardado()
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Error al editar el pedido')
+    } finally { setGuardando(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-8">
+        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+          <h2>Editar pedido</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+        </div>
+        <form onSubmit={guardar} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+          <div className="border border-gray-200 rounded-xl divide-y divide-gray-100">
+            {items.map((it, idx) => (
+              <div key={it.id ?? `nuevo-${idx}`} className="flex items-center gap-3 px-3 py-2.5">
+                <Package className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800 truncate">{it.material_descripcion}</p>
+                </div>
+                <input type="number" min={0.01} step="0.01" className="input w-24 text-right"
+                  value={it.cantidad} onChange={e => cambiarCantidad(idx, e.target.value)} />
+                <span className="text-xs text-gray-400 w-10">{it.unidad}</span>
+                <button type="button" onClick={() => quitarItem(idx)} className="text-gray-400 hover:text-red-600 flex-shrink-0">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+            {items.length === 0 && <p className="text-center text-sm text-gray-400 py-6">Sin materiales — agrega al menos uno abajo</p>}
+          </div>
+
+          <div className="relative">
+            <label className="label">Agregar otro material</label>
+            <input className="input" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar material..." />
+            {resultados.length > 0 && (
+              <div className="absolute z-10 mt-1 w-full border border-gray-200 rounded-xl bg-white shadow-lg divide-y divide-gray-100 max-h-56 overflow-y-auto">
+                {resultados.map(m => (
+                  <button key={m.id} type="button" onClick={() => agregarMaterial(m)}
+                    className="w-full text-left px-3 py-2 hover:bg-amber-50 flex items-center justify-between gap-2">
+                    <span className="text-sm text-gray-800">{m.descripcion}</span>
+                    <span className="text-xs text-gray-400 flex items-center gap-1"><Plus className="w-3 h-3" />{m.stock_total} {m.unidad}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="label">Frente / equipo destino</label>
+            <input className="input" value={frenteDestino} onChange={e => setFrenteDestino(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Observaciones</label>
+            <input className="input" value={observaciones} onChange={e => setObservaciones(e.target.value)} />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" className="btn-secondary" onClick={onClose}>Cancelar</button>
+            <button type="submit" disabled={guardando} className="btn-primary">{guardando ? 'Guardando...' : 'Guardar Cambios'}</button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }

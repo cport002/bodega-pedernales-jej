@@ -188,9 +188,12 @@ export interface LoteDisponible {
 export interface DespachoDeSolicitud {
   id: number
   lote_id: number
+  pedido_item_id: number
   lote_codigo: string
   cantidad: number
   fecha: string
+  material_descripcion: string
+  unidad: string
 }
 
 export interface LoteAprobado {
@@ -202,7 +205,9 @@ export interface LoteAprobado {
   pallet_numero?: string | null
 }
 
-export interface Solicitud {
+// Un material dentro de un pedido (antes "la solicitud" era 1 solo material — ahora un pedido
+// puede llevar varios, cada uno es un PedidoItem).
+export interface PedidoItem {
   id: number
   material_id: number
   material_descripcion: string
@@ -210,6 +215,13 @@ export interface Solicitud {
   unidad: string
   cantidad_solicitada: number
   cantidad_aprobada?: number | null
+  stock_disponible_actual?: number
+  lotes_disponibles?: LoteDisponible[]
+  lotes_aprobados?: LoteAprobado[]
+}
+
+export interface Solicitud {
+  id: number
   frente_destino?: string | null
   observaciones?: string | null
   estado: 'pendiente' | 'aprobada' | 'rechazada' | 'entregada'
@@ -222,9 +234,10 @@ export interface Solicitud {
   fecha_resolucion?: string | null
   fecha_entrega?: string | null
   folio?: string
-  stock_disponible_actual?: number
-  lotes_disponibles?: LoteDisponible[]
-  lotes_aprobados?: LoteAprobado[]
+  items?: PedidoItem[]
+  // Solo vienen en el listado (GET /solicitudes), no en el detalle:
+  total_items?: number
+  materiales_resumen?: string
   despachos?: DespachoDeSolicitud[]
 }
 

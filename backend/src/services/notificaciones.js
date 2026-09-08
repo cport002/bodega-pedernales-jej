@@ -14,26 +14,30 @@ async function crearNotificacion(tsql, { usuario_id, tipo, titulo, mensaje, soli
   }).catch(() => {});
 }
 
+// resumenMateriales: texto corto armado por quien llama, ej. "CABLE 2/0" (1 item) o
+// "3 materiales (CABLE 2/0, BRIDA..., y 1 más)" (varios) — la notificacion no necesita saber
+// que un pedido puede tener varios items, solo mostrar un resumen legible.
+
 // Avisa a todo admin/bodeguero activo cuando un solicitante crea un pedido nuevo.
-async function notificarNuevaSolicitud(solicitud, materialDescripcion, solicitanteNombre) {
+async function notificarNuevaSolicitud(pedido, resumenMateriales, solicitanteNombre) {
   const destinatarios = (await sql("SELECT id FROM usuarios WHERE rol IN ('admin','bodeguero') AND activo = 1")).rows;
   const titulo = 'Nueva solicitud de material';
-  const mensaje = `${solicitanteNombre} pidió ${solicitud.cantidad_solicitada} de ${materialDescripcion}`;
+  const mensaje = `${solicitanteNombre} pidió ${resumenMateriales}`;
   await Promise.all(destinatarios.map(u =>
-    crearNotificacion(sql, { usuario_id: u.id, tipo: 'solicitud_nueva', titulo, mensaje, solicitud_id: solicitud.id })
+    crearNotificacion(sql, { usuario_id: u.id, tipo: 'solicitud_nueva', titulo, mensaje, solicitud_id: pedido.id })
   ));
 }
 
 // Avisa al solicitante cuando su pedido fue aprobado o rechazado.
-async function notificarResolucionSolicitud(solicitud, materialDescripcion, aprobada, motivoRechazo, folio) {
+async function notificarResolucionSolicitud(pedido, resumenMateriales, aprobada, motivoRechazo, folio) {
   const titulo = aprobada ? 'Solicitud aprobada — vale listo' : 'Solicitud rechazada';
   const mensaje = aprobada
-    ? `Tu pedido de ${materialDescripcion} fue aprobado. Vale ${folio}: descárgalo y llévalo a bodega para retirar`
-    : `Tu pedido de ${materialDescripcion} fue rechazado${motivoRechazo ? `: ${motivoRechazo}` : ''}`;
+    ? `Tu pedido de ${resumenMateriales} fue aprobado. Vale ${folio}: descárgalo y llévalo a bodega para retirar`
+    : `Tu pedido de ${resumenMateriales} fue rechazado${motivoRechazo ? `: ${motivoRechazo}` : ''}`;
   await crearNotificacion(sql, {
-    usuario_id: solicitud.solicitante_id,
+    usuario_id: pedido.solicitante_id,
     tipo: aprobada ? 'solicitud_aprobada' : 'solicitud_rechazada',
-    titulo, mensaje, solicitud_id: solicitud.id,
+    titulo, mensaje, solicitud_id: pedido.id,
   });
 }
 

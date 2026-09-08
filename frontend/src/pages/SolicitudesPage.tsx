@@ -98,8 +98,7 @@ export default function SolicitudesPage() {
               <tr>
                 <th className="table-header">Fecha</th>
                 <th className="table-header">Solicitante</th>
-                <th className="table-header">Material</th>
-                <th className="table-header text-right">Cantidad</th>
+                <th className="table-header">Materiales</th>
                 <th className="table-header">Frente destino</th>
                 <th className="table-header">Estado</th>
                 <th className="table-header text-center">Acciones</th>
@@ -110,8 +109,10 @@ export default function SolicitudesPage() {
                 <tr key={s.id} className="table-row">
                   <td className="table-cell">{fmt.fechaHora(s.fecha_solicitud)}</td>
                   <td className="table-cell">{s.solicitante_nombre}</td>
-                  <td className="table-cell font-medium">{s.material_descripcion}</td>
-                  <td className="table-cell text-right tabular-nums">{fmt.num(s.cantidad_solicitada)} {s.unidad}</td>
+                  <td className="table-cell font-medium">
+                    <span className="badge-blue mr-2">{s.total_items ?? 1}</span>
+                    <span className="text-gray-700">{s.materiales_resumen || '-'}</span>
+                  </td>
                   <td className="table-cell">{s.frente_destino || '-'}</td>
                   <td className="table-cell"><span className={ESTADO_BADGE[s.estado]}>{ESTADO_LABEL[s.estado]}</span></td>
                   <td className="table-cell text-center">

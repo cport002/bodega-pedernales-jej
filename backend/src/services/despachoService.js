@@ -3,7 +3,7 @@
 // que puede crear varios despachos (uno por lote elegido) en una sola transaccion.
 async function crearDespachoEnTransaccion(tsql, {
   lote_id, cantidad, frente_destino, retirado_por, observaciones,
-  firma_url, foto_url, usuario_id, solicitud_id = null
+  firma_url, foto_url, usuario_id, solicitud_id = null, pedido_item_id = null
 }) {
   const lote = (await tsql('SELECT id FROM lotes WHERE id = ?', [lote_id])).rows[0];
   if (!lote) throw Object.assign(new Error(`Lote ${lote_id} no encontrado`), { status: 404 });
@@ -14,9 +14,9 @@ async function crearDespachoEnTransaccion(tsql, {
   }
 
   const r = await tsql(
-    `INSERT INTO despachos (lote_id, cantidad, frente_destino, retirado_por, observaciones, firma_url, foto_url, usuario_id, solicitud_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-    [lote_id, cantidad, frente_destino || null, retirado_por || null, observaciones || null, firma_url, foto_url, usuario_id, solicitud_id]
+    `INSERT INTO despachos (lote_id, cantidad, frente_destino, retirado_por, observaciones, firma_url, foto_url, usuario_id, solicitud_id, pedido_item_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    [lote_id, cantidad, frente_destino || null, retirado_por || null, observaciones || null, firma_url, foto_url, usuario_id, solicitud_id, pedido_item_id]
   );
   const despachoId = r.rows[0].id;
 
