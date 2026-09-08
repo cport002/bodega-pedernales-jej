@@ -227,6 +227,91 @@ function ImportarExcelCard({ empresaId, onImportado }: { empresaId: string; onIm
 
 const TIPO_LABEL: Record<string, string> = { directo: 'Directo', indirecto: 'Indirecto' }
 
+type ResultadoImportarCatalogo = { creados: number; actualizados: number; sinNombre: number }
+
+// Carga masiva por Excel para un catalogo (personal o equipos) de la empresa: descarga la lista
+// actual, se agregan filas nuevas (o se corrigen las existentes) y se vuelve a subir — hace upsert
+// por RUT/PATENTE en vez de crear IDs nuevos cada vez, asi no duplica a quien ya estaba cargado.
+function ImportarCatalogoCard({ empresaId, tipo, onImportado }: { empresaId: string; tipo: 'personal' | 'equipos'; onImportado: () => void }) {
+  const [descargando, setDescargando] = useState(false)
+  const [archivo, setArchivo] = useState<File | null>(null)
+  const [cargando, setCargando] = useState(false)
+  const [resultado, setResultado] = useState<ResultadoImportarCatalogo | null>(null)
+
+  const label = tipo === 'personal' ? 'Personal' : 'Equipos'
+  const claveLabel = tipo === 'personal' ? 'RUT' : 'PATENTE'
+
+  const descargarPlantilla = async () => {
+    setDescargando(true)
+    try {
+      const r = await api.get(`/pyc/empresas/${empresaId}/${tipo}/plantilla`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([r.data]))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `plantilla_${tipo}_empresa${empresaId}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      toast.error('Error al descargar la plantilla')
+    } finally { setDescargando(false) }
+  }
+
+  const importar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!archivo) return
+    setCargando(true)
+    setResultado(null)
+    try {
+      const form = new FormData()
+      form.append('archivo', archivo)
+      const r = await api.post<ResultadoImportarCatalogo>(`/pyc/empresas/${empresaId}/${tipo}/importar`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+      setResultado(r.data)
+      toast.success(`${r.data.creados} creado(s), ${r.data.actualizados} actualizado(s)`)
+      setArchivo(null)
+      onImportado()
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Error al cargar el archivo')
+    } finally { setCargando(false) }
+  }
+
+  return (
+    <div className="card space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h3>Carga Masiva desde Excel</h3>
+        <button type="button" onClick={descargarPlantilla} disabled={descargando} className="btn-secondary inline-flex items-center gap-2 disabled:opacity-60">
+          <Download className="w-4 h-4" /> {descargando ? 'Generando...' : 'Descargar Plantilla'}
+        </button>
+      </div>
+      <p className="text-xs text-gray-500">
+        Descarga {label.toLowerCase()} ya cargado, agrega filas nuevas abajo (o corrige las existentes) y vuelve a subirlo — si el {claveLabel} de una fila ya existe, se actualiza en vez de duplicarse.
+      </p>
+      <form onSubmit={importar} className="flex flex-wrap items-end gap-4">
+        <div className="min-w-[240px]">
+          <label className="label">Archivo (.xlsx) *</label>
+          <input type="file" accept=".xlsx" className="input" onChange={e => setArchivo(e.target.files?.[0] || null)} required />
+        </div>
+        <button type="submit" disabled={cargando} className="btn-primary inline-flex items-center gap-2 disabled:opacity-60">
+          <Upload className="w-4 h-4" /> {cargando ? 'Cargando...' : 'Cargar Archivo'}
+        </button>
+      </form>
+
+      {resultado && (
+        <div className="text-sm bg-gray-50 rounded-xl p-4 space-y-1.5">
+          <p>
+            <span className="font-semibold text-green-700">{resultado.creados}</span> creado(s),{' '}
+            <span className="font-semibold text-amber-700">{resultado.actualizados}</span> actualizado(s).
+          </p>
+          {resultado.sinNombre > 0 && (
+            <p className="text-red-700">{resultado.sinNombre} fila(s) sin nombre, se omitieron.</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PersonalTab({ empresaId, personal, puedeGestionar, onCambio }: { empresaId: string; personal: PycPersonal[]; puedeGestionar: boolean; onCambio: () => void }) {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ nombre: '', rut: '', cargo: '', turno: '', tipo: 'directo' as 'directo' | 'indirecto' })
@@ -248,6 +333,7 @@ function PersonalTab({ empresaId, personal, puedeGestionar, onCambio }: { empres
 
   return (
     <div className="space-y-4">
+      {puedeGestionar && <ImportarCatalogoCard empresaId={empresaId} tipo="personal" onImportado={onCambio} />}
       {puedeGestionar && (
         <div className="flex justify-end">
           <button onClick={() => setShowForm(true)} className="btn-secondary flex items-center gap-2"><Plus className="w-4 h-4" /> Agregar Persona</button>
@@ -355,6 +441,7 @@ function EquiposTab({ empresaId, equipos, puedeGestionar, onCambio }: { empresaI
 
   return (
     <div className="space-y-4">
+      {puedeGestionar && <ImportarCatalogoCard empresaId={empresaId} tipo="equipos" onImportado={onCambio} />}
       {puedeGestionar && (
         <div className="flex justify-end">
           <button onClick={() => setShowForm(true)} className="btn-secondary flex items-center gap-2"><Plus className="w-4 h-4" /> Agregar Equipo</button>

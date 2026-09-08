@@ -41,6 +41,21 @@ const COL_EQUIPO = {
 };
 const ESTADOS_VALIDOS = ['presente', 'descanso', 'licencia', 'permiso', 'falta'];
 
+// Columnas de la plantilla de alta masiva de personal/equipos — sin columna ID porque es para
+// CREAR (o actualizar por RUT/PATENTE si ya existen), no para referenciar filas ya cargadas.
+const COL_PERSONAL_MASIVO = { nombre: 'NOMBRE', rut: 'RUT', cargo: 'CARGO', turno: 'TURNO', tipo: 'TIPO (directo / indirecto)' };
+const COL_EQUIPO_MASIVO = { nombre: 'EQUIPO', patente: 'PATENTE', area: 'AREA DE TRABAJO' };
+
+// XLSX.utils.json_to_sheet(filas) infiere las columnas a partir de las claves de `filas[0]` — si el
+// array viene vacio (empresa recien creada, sin nomina/equipos todavia, el caso mas comun al usar
+// esta plantilla) la hoja queda SIN encabezados. Se escribe el encabezado a mano primero para que
+// siempre este presente, tenga o no filas de datos.
+function hojaConEncabezado(columnas, filas) {
+  const ws = XLSX.utils.aoa_to_sheet([Object.values(columnas)]);
+  XLSX.utils.sheet_add_json(ws, filas, { origin: 'A2', skipHeader: true });
+  return ws;
+}
+
 // Normaliza texto libre (tildes, mayusculas) para hacer el match de ESTADO mas tolerante a como
 // cada persona termine escribiendo en Excel.
 function normalizar(s) {
@@ -132,6 +147,87 @@ router.put('/personal/:id', autenticar, autorizar('admin', 'bodeguero', 'contrat
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/pyc/empresas/:id/personal/plantilla — .xlsx con la nomina actual (si hay) para agregar
+// mas filas abajo, o vacio con solo encabezados si la empresa recien parte. Al volver a subirlo,
+// las filas con un RUT que ya existe en la nomina se ACTUALIZAN en vez de duplicarse.
+router.get('/empresas/:id/personal/plantilla', autenticar, autorizar('admin', 'bodeguero', 'contratista'), async (req, res) => {
+  try {
+    if (!empresaPermitida(req, req.params.id)) return res.status(403).json({ error: 'Sin permisos para esta empresa' });
+    const personal = (await sql('SELECT * FROM pyc_personal WHERE empresa_id = ? ORDER BY tipo, nombre', [req.params.id])).rows;
+
+    const filas = personal.map(p => ({
+      [COL_PERSONAL_MASIVO.nombre]: p.nombre, [COL_PERSONAL_MASIVO.rut]: p.rut || '',
+      [COL_PERSONAL_MASIVO.cargo]: p.cargo || '', [COL_PERSONAL_MASIVO.turno]: p.turno || '',
+      [COL_PERSONAL_MASIVO.tipo]: p.tipo
+    }));
+    const ws = hojaConEncabezado(COL_PERSONAL_MASIVO, filas);
+    ws['!cols'] = [{ wch: 32 }, { wch: 14 }, { wch: 22 }, { wch: 10 }, { wch: 20 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Personal');
+
+    const instrucciones = XLSX.utils.aoa_to_sheet([
+      ['Cómo usar esta plantilla'],
+      ['1. Agrega una fila por cada persona nueva (NOMBRE es obligatorio, el resto opcional).'],
+      ['2. Si el RUT de una fila ya existe en la nómina, se actualizan sus datos en vez de crear a la persona de nuevo — sirve para corregir cargo/turno masivamente.'],
+      ['3. TIPO: "directo" o "indirecto" (si se deja vacío o con otro valor, queda como "directo").'],
+      ['4. No borres las filas de personas que ya están — si borras una fila, esa persona NO se elimina de la nómina (esta plantilla nunca elimina, solo crea o actualiza).'],
+      ['5. Sube este archivo en P&C > Personal > Cargar desde Excel.'],
+    ]);
+    instrucciones['!cols'] = [{ wch: 100 }];
+    XLSX.utils.book_append_sheet(wb, instrucciones, 'Instrucciones');
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="plantilla_personal_empresa${req.params.id}.xlsx"`);
+    res.send(buffer);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/pyc/empresas/:id/personal/importar — multipart: archivo (.xlsx de /personal/plantilla).
+// Upsert por RUT: si el RUT ya existe en la nomina de esta empresa, actualiza esa fila; si no (o
+// viene sin RUT), crea una persona nueva.
+router.post('/empresas/:id/personal/importar', autenticar, autorizar('admin', 'bodeguero', 'contratista'), uploadExcel.single('archivo'), async (req, res) => {
+  try {
+    if (!empresaPermitida(req, req.params.id)) return res.status(403).json({ error: 'Sin permisos para esta empresa' });
+    if (!req.file) return res.status(400).json({ error: 'Archivo .xlsx requerido' });
+
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const ws = wb.Sheets['Personal'] || wb.Sheets[wb.SheetNames[0]];
+    const filas = XLSX.utils.sheet_to_json(ws, { defval: null });
+
+    const existentesPorRut = new Map(
+      (await sql('SELECT id, rut FROM pyc_personal WHERE empresa_id = ? AND rut IS NOT NULL', [req.params.id])).rows
+        .map(r => [String(r.rut).trim().toUpperCase(), r.id])
+    );
+
+    let creados = 0, actualizados = 0;
+    const sinNombre = [];
+
+    await withTransaction(async (tsql) => {
+      for (const fila of filas) {
+        const nombre = fila[COL_PERSONAL_MASIVO.nombre] ? String(fila[COL_PERSONAL_MASIVO.nombre]).trim() : '';
+        if (!nombre) { if (Object.values(fila).some(v => v)) sinNombre.push(JSON.stringify(fila)); continue; }
+        const rut = fila[COL_PERSONAL_MASIVO.rut] ? String(fila[COL_PERSONAL_MASIVO.rut]).trim() : null;
+        const cargo = fila[COL_PERSONAL_MASIVO.cargo] ? String(fila[COL_PERSONAL_MASIVO.cargo]).trim() : null;
+        const turno = fila[COL_PERSONAL_MASIVO.turno] ? String(fila[COL_PERSONAL_MASIVO.turno]).trim() : null;
+        const tipo = normalizar(fila[COL_PERSONAL_MASIVO.tipo]) === 'indirecto' ? 'indirecto' : 'directo';
+
+        const idExistente = rut ? existentesPorRut.get(rut.toUpperCase()) : null;
+        if (idExistente) {
+          await tsql('UPDATE pyc_personal SET nombre = ?, cargo = ?, turno = ?, tipo = ? WHERE id = ?', [nombre, cargo, turno, tipo, idExistente]);
+          actualizados++;
+        } else {
+          await tsql('INSERT INTO pyc_personal (empresa_id, nombre, rut, cargo, turno, tipo) VALUES (?, ?, ?, ?, ?, ?)',
+            [req.params.id, nombre, rut, cargo, turno, tipo]);
+          creados++;
+        }
+      }
+    });
+
+    res.status(201).json({ creados, actualizados, sinNombre: sinNombre.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---- Equipos (catalogo reutilizable dia a dia) ----
 
 router.get('/empresas/:id/equipos', autenticar, autorizar('admin', 'bodeguero', 'visor', 'contratista'), async (req, res) => {
@@ -167,6 +263,79 @@ router.put('/equipos/:id', autenticar, autorizar('admin', 'bodeguero', 'contrati
         activo !== undefined ? activo : anterior.activo, req.params.id]
     );
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/pyc/empresas/:id/equipos/plantilla — analogo a /personal/plantilla pero para el catalogo
+// de equipos/maquinaria; upsert por PATENTE al volver a subirla.
+router.get('/empresas/:id/equipos/plantilla', autenticar, autorizar('admin', 'bodeguero', 'contratista'), async (req, res) => {
+  try {
+    if (!empresaPermitida(req, req.params.id)) return res.status(403).json({ error: 'Sin permisos para esta empresa' });
+    const equipos = (await sql('SELECT * FROM pyc_equipos WHERE empresa_id = ? ORDER BY nombre', [req.params.id])).rows;
+
+    const filas = equipos.map(e => ({
+      [COL_EQUIPO_MASIVO.nombre]: e.nombre, [COL_EQUIPO_MASIVO.patente]: e.patente || '', [COL_EQUIPO_MASIVO.area]: e.area_trabajo || ''
+    }));
+    const ws = hojaConEncabezado(COL_EQUIPO_MASIVO, filas);
+    ws['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 22 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Equipos');
+
+    const instrucciones = XLSX.utils.aoa_to_sheet([
+      ['Cómo usar esta plantilla'],
+      ['1. Agrega una fila por cada equipo/maquinaria nuevo (EQUIPO es obligatorio, el resto opcional).'],
+      ['2. Si la PATENTE de una fila ya existe en el catálogo, se actualizan sus datos en vez de crear el equipo de nuevo.'],
+      ['3. No borres las filas de equipos que ya están — no se eliminan del catálogo aunque falten en el archivo, esta plantilla nunca elimina, solo crea o actualiza.'],
+      ['4. Sube este archivo en P&C > Equipos > Cargar desde Excel.'],
+    ]);
+    instrucciones['!cols'] = [{ wch: 100 }];
+    XLSX.utils.book_append_sheet(wb, instrucciones, 'Instrucciones');
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="plantilla_equipos_empresa${req.params.id}.xlsx"`);
+    res.send(buffer);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/pyc/empresas/:id/equipos/importar — multipart: archivo (.xlsx de /equipos/plantilla).
+router.post('/empresas/:id/equipos/importar', autenticar, autorizar('admin', 'bodeguero', 'contratista'), uploadExcel.single('archivo'), async (req, res) => {
+  try {
+    if (!empresaPermitida(req, req.params.id)) return res.status(403).json({ error: 'Sin permisos para esta empresa' });
+    if (!req.file) return res.status(400).json({ error: 'Archivo .xlsx requerido' });
+
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const ws = wb.Sheets['Equipos'] || wb.Sheets[wb.SheetNames[0]];
+    const filas = XLSX.utils.sheet_to_json(ws, { defval: null });
+
+    const existentesPorPatente = new Map(
+      (await sql('SELECT id, patente FROM pyc_equipos WHERE empresa_id = ? AND patente IS NOT NULL', [req.params.id])).rows
+        .map(r => [String(r.patente).trim().toUpperCase(), r.id])
+    );
+
+    let creados = 0, actualizados = 0;
+    const sinNombre = [];
+
+    await withTransaction(async (tsql) => {
+      for (const fila of filas) {
+        const nombre = fila[COL_EQUIPO_MASIVO.nombre] ? String(fila[COL_EQUIPO_MASIVO.nombre]).trim() : '';
+        if (!nombre) { if (Object.values(fila).some(v => v)) sinNombre.push(JSON.stringify(fila)); continue; }
+        const patente = fila[COL_EQUIPO_MASIVO.patente] ? String(fila[COL_EQUIPO_MASIVO.patente]).trim() : null;
+        const area = fila[COL_EQUIPO_MASIVO.area] ? String(fila[COL_EQUIPO_MASIVO.area]).trim() : null;
+
+        const idExistente = patente ? existentesPorPatente.get(patente.toUpperCase()) : null;
+        if (idExistente) {
+          await tsql('UPDATE pyc_equipos SET nombre = ?, area_trabajo = ? WHERE id = ?', [nombre, area, idExistente]);
+          actualizados++;
+        } else {
+          await tsql('INSERT INTO pyc_equipos (empresa_id, nombre, patente, area_trabajo) VALUES (?, ?, ?, ?)',
+            [req.params.id, nombre, patente, area]);
+          creados++;
+        }
+      }
+    });
+
+    res.status(201).json({ creados, actualizados, sinNombre: sinNombre.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -260,14 +429,14 @@ router.get('/empresas/:id/reportes/plantilla', autenticar, autorizar('admin', 'b
       [COL_PERSONAL.cargo]: p.cargo || '', [COL_PERSONAL.turno]: p.turno || '',
       [COL_PERSONAL.estado]: 'presente', [COL_PERSONAL.hh]: 12
     }));
-    const wsPersonal = XLSX.utils.json_to_sheet(filasPersonal);
+    const wsPersonal = hojaConEncabezado(COL_PERSONAL, filasPersonal);
     wsPersonal['!cols'] = [{ wch: 6 }, { wch: 32 }, { wch: 14 }, { wch: 22 }, { wch: 10 }, { wch: 40 }, { wch: 8 }];
 
     const filasEquipos = equipos.map(e => ({
       [COL_EQUIPO.id]: e.id, [COL_EQUIPO.nombre]: e.nombre, [COL_EQUIPO.patente]: e.patente || '',
       [COL_EQUIPO.area]: e.area_trabajo || '', [COL_EQUIPO.disponible]: 'SI', [COL_EQUIPO.hh]: 0, [COL_EQUIPO.observaciones]: ''
     }));
-    const wsEquipos = XLSX.utils.json_to_sheet(filasEquipos);
+    const wsEquipos = hojaConEncabezado(COL_EQUIPO, filasEquipos);
     wsEquipos['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 30 }];
 
     const wb = XLSX.utils.book_new();
