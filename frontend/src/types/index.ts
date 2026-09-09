@@ -315,6 +315,32 @@ export interface PycFoto {
   url: string
 }
 
+export interface PycActividad {
+  id: number
+  empresa_id: number
+  area?: string | null
+  edt?: string | null
+  descripcion: string
+  unidad?: string | null
+  cantidad_contractual?: number | null
+  hh_estimadas?: number | null
+  activo: boolean
+  avance_acumulado?: number
+  hh_ganadas_acumuladas?: number
+  porcentaje_avance?: number | null
+}
+
+export interface PycAvanceActividad {
+  id?: number
+  actividad_id: number
+  actividad_descripcion?: string
+  unidad?: string | null
+  cantidad_contractual?: number | null
+  cantidad_real: number
+  hh_ganadas: number
+  comentario?: string | null
+}
+
 export interface PycReporteDiario {
   id: number
   empresa_id: number
@@ -327,5 +353,6 @@ export interface PycReporteDiario {
   hh_totales?: number
   asistencia?: PycAsistencia[]
   equipos?: PycUsoEquipo[]
+  actividades?: PycAvanceActividad[]
   fotos?: PycFoto[]
 }

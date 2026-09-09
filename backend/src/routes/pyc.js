@@ -9,7 +9,7 @@ const router = express.Router();
 // Crea la cabecera + asistencia + equipos de un reporte diario dentro de una transaccion ya abierta
 // — usado tanto por la carga manual (formulario) como por la carga vía plantilla Excel, para no
 // duplicar esta logica en dos lados.
-async function crearReporteDiario(tsql, { empresaId, fecha, frenteDestino, observacionesSsoma, observacionesGenerales, creadoPor, asistencia, equipos }) {
+async function crearReporteDiario(tsql, { empresaId, fecha, frenteDestino, observacionesSsoma, observacionesGenerales, creadoPor, asistencia, equipos, actividades }) {
   const r = await tsql(
     `INSERT INTO pyc_reportes_diarios (empresa_id, fecha, frente_destino, observaciones_ssoma, observaciones_generales, creado_por)
      VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
@@ -26,6 +26,14 @@ async function crearReporteDiario(tsql, { empresaId, fecha, frenteDestino, obser
     await tsql('INSERT INTO pyc_uso_equipos (reporte_id, equipo_id, disponible, hh_operativas, observaciones) VALUES (?, ?, ?, ?, ?)',
       [id, e.equipo_id, e.disponible !== false, Number(e.hh_operativas) || 0, e.observaciones || null]);
   }
+  for (const a of actividades || []) {
+    if (!a.actividad_id) continue;
+    const cantidad = Number(a.cantidad_real) || 0;
+    const hh = Number(a.hh_ganadas) || 0;
+    if (cantidad === 0 && hh === 0 && !a.comentario) continue; // sin avance ese dia, no vale la pena guardar la fila
+    await tsql('INSERT INTO pyc_avance_actividades (reporte_id, actividad_id, cantidad_real, hh_ganadas, comentario) VALUES (?, ?, ?, ?, ?)',
+      [id, a.actividad_id, cantidad, hh, a.comentario || null]);
+  }
   return id;
 }
 
@@ -39,12 +47,20 @@ const COL_EQUIPO = {
   id: 'ID', nombre: 'EQUIPO', patente: 'PATENTE', area: 'AREA DE TRABAJO',
   disponible: 'DISPONIBLE (SI / NO)', hh: 'HH OPERATIVAS', observaciones: 'OBSERVACIONES'
 };
+const COL_ACTIVIDAD = {
+  id: 'ID', descripcion: 'DESCRIPCION', unidad: 'UNIDAD', avanceAcumPrevio: 'AVANCE ACUM. ANTES DE HOY',
+  cantidadContractual: 'CANTIDAD CONTRACTUAL', cantidadReal: 'CANTIDAD AVANZADA HOY', hh: 'HH GANADAS HOY', comentario: 'COMENTARIO'
+};
 const ESTADOS_VALIDOS = ['presente', 'descanso', 'licencia', 'permiso', 'falta'];
 
 // Columnas de la plantilla de alta masiva de personal/equipos — sin columna ID porque es para
 // CREAR (o actualizar por RUT/PATENTE si ya existen), no para referenciar filas ya cargadas.
 const COL_PERSONAL_MASIVO = { nombre: 'NOMBRE', rut: 'RUT', cargo: 'CARGO', turno: 'TURNO', tipo: 'TIPO (directo / indirecto)' };
 const COL_EQUIPO_MASIVO = { nombre: 'EQUIPO', patente: 'PATENTE', area: 'AREA DE TRABAJO' };
+const COL_ACTIVIDAD_MASIVO = {
+  area: 'AREA', edt: 'EDT', descripcion: 'DESCRIPCION', unidad: 'UNIDAD',
+  cantidad: 'CANTIDAD CONTRACTUAL', hh: 'HH ESTIMADAS'
+};
 
 // XLSX.utils.json_to_sheet(filas) infiere las columnas a partir de las claves de `filas[0]` — si el
 // array viene vacio (empresa recien creada, sin nomina/equipos todavia, el caso mas comun al usar
@@ -339,6 +355,136 @@ router.post('/empresas/:id/equipos/importar', autenticar, autorizar('admin', 'bo
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ---- Actividades (EDT del programa contractual, con avance fisico acumulado) ----
+
+// GET /api/pyc/empresas/:id/actividades — incluye el avance acumulado (suma de todos los reportes
+// diarios) y el % de avance fisico contra la cantidad contractual, para no tener que calcularlo en
+// el frontend sumando reporte por reporte.
+router.get('/empresas/:id/actividades', autenticar, autorizar('admin', 'bodeguero', 'visor', 'contratista'), async (req, res) => {
+  try {
+    if (!empresaPermitida(req, req.params.id)) return res.status(403).json({ error: 'Sin permisos para esta empresa' });
+    const r = await sql(
+      `SELECT a.*,
+         COALESCE((SELECT SUM(av.cantidad_real) FROM pyc_avance_actividades av WHERE av.actividad_id = a.id), 0) AS avance_acumulado,
+         COALESCE((SELECT SUM(av.hh_ganadas) FROM pyc_avance_actividades av WHERE av.actividad_id = a.id), 0) AS hh_ganadas_acumuladas
+       FROM pyc_actividades a WHERE a.empresa_id = ? ORDER BY a.activo DESC, a.area, a.edt, a.descripcion`,
+      [req.params.id]
+    );
+    res.json(r.rows.map(row => ({
+      ...row,
+      porcentaje_avance: row.cantidad_contractual > 0 ? Number(row.avance_acumulado) / Number(row.cantidad_contractual) : null
+    })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/empresas/:id/actividades', autenticar, autorizar('admin', 'bodeguero', 'contratista'), async (req, res) => {
+  try {
+    if (!empresaPermitida(req, req.params.id)) return res.status(403).json({ error: 'Sin permisos para esta empresa' });
+    const { area, edt, descripcion, unidad, cantidad_contractual, hh_estimadas } = req.body;
+    if (!descripcion) return res.status(400).json({ error: 'La descripción de la actividad es requerida' });
+    const r = await sql(
+      'INSERT INTO pyc_actividades (empresa_id, area, edt, descripcion, unidad, cantidad_contractual, hh_estimadas) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id',
+      [req.params.id, area || null, edt || null, descripcion.trim(), unidad || null, cantidad_contractual || null, hh_estimadas || null]
+    );
+    res.status(201).json({ id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/actividades/:id', autenticar, autorizar('admin', 'bodeguero', 'contratista'), async (req, res) => {
+  try {
+    const anterior = (await sql('SELECT * FROM pyc_actividades WHERE id = ?', [req.params.id])).rows[0];
+    if (!anterior) return res.status(404).json({ error: 'No encontrada' });
+    if (!empresaPermitida(req, anterior.empresa_id)) return res.status(403).json({ error: 'Sin permisos para esta empresa' });
+    const { area, edt, descripcion, unidad, cantidad_contractual, hh_estimadas, activo } = req.body;
+    await sql(
+      `UPDATE pyc_actividades SET area = ?, edt = ?, descripcion = ?, unidad = ?, cantidad_contractual = ?, hh_estimadas = ?, activo = ? WHERE id = ?`,
+      [area ?? anterior.area, edt ?? anterior.edt, descripcion ?? anterior.descripcion, unidad ?? anterior.unidad,
+        cantidad_contractual ?? anterior.cantidad_contractual, hh_estimadas ?? anterior.hh_estimadas,
+        activo !== undefined ? activo : anterior.activo, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/pyc/empresas/:id/actividades/plantilla — analogo a personal/equipos; upsert por EDT al
+// volver a subirla (si dos actividades comparten EDT vacio, ambas se crean como nuevas siempre).
+router.get('/empresas/:id/actividades/plantilla', autenticar, autorizar('admin', 'bodeguero', 'contratista'), async (req, res) => {
+  try {
+    if (!empresaPermitida(req, req.params.id)) return res.status(403).json({ error: 'Sin permisos para esta empresa' });
+    const actividades = (await sql('SELECT * FROM pyc_actividades WHERE empresa_id = ? ORDER BY area, edt, descripcion', [req.params.id])).rows;
+
+    const filas = actividades.map(a => ({
+      [COL_ACTIVIDAD_MASIVO.area]: a.area || '', [COL_ACTIVIDAD_MASIVO.edt]: a.edt || '',
+      [COL_ACTIVIDAD_MASIVO.descripcion]: a.descripcion, [COL_ACTIVIDAD_MASIVO.unidad]: a.unidad || '',
+      [COL_ACTIVIDAD_MASIVO.cantidad]: a.cantidad_contractual ?? '', [COL_ACTIVIDAD_MASIVO.hh]: a.hh_estimadas ?? ''
+    }));
+    const ws = hojaConEncabezado(COL_ACTIVIDAD_MASIVO, filas);
+    ws['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 50 }, { wch: 10 }, { wch: 18 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Actividades');
+
+    const instrucciones = XLSX.utils.aoa_to_sheet([
+      ['Cómo usar esta plantilla'],
+      ['1. Agrega una fila por cada actividad/ítem del programa (DESCRIPCION es obligatoria, el resto opcional).'],
+      ['2. Si el EDT de una fila ya existe, se actualizan sus datos en vez de crear la actividad de nuevo.'],
+      ['3. CANTIDAD CONTRACTUAL es el total comprometido de esa actividad (ej. 500 m2) — con eso el sistema calcula el % de avance físico acumulado a medida que se cargan los reportes diarios.'],
+      ['4. No borres las filas de actividades que ya están — no se eliminan del catálogo aunque falten en el archivo.'],
+      ['5. Sube este archivo en P&C > Actividades > Cargar desde Excel.'],
+    ]);
+    instrucciones['!cols'] = [{ wch: 100 }];
+    XLSX.utils.book_append_sheet(wb, instrucciones, 'Instrucciones');
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="plantilla_actividades_empresa${req.params.id}.xlsx"`);
+    res.send(buffer);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/empresas/:id/actividades/importar', autenticar, autorizar('admin', 'bodeguero', 'contratista'), uploadExcel.single('archivo'), async (req, res) => {
+  try {
+    if (!empresaPermitida(req, req.params.id)) return res.status(403).json({ error: 'Sin permisos para esta empresa' });
+    if (!req.file) return res.status(400).json({ error: 'Archivo .xlsx requerido' });
+
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const ws = wb.Sheets['Actividades'] || wb.Sheets[wb.SheetNames[0]];
+    const filas = XLSX.utils.sheet_to_json(ws, { defval: null });
+
+    const existentesPorEdt = new Map(
+      (await sql('SELECT id, edt FROM pyc_actividades WHERE empresa_id = ? AND edt IS NOT NULL', [req.params.id])).rows
+        .map(r => [String(r.edt).trim().toUpperCase(), r.id])
+    );
+
+    let creados = 0, actualizados = 0;
+    const sinNombre = [];
+
+    await withTransaction(async (tsql) => {
+      for (const fila of filas) {
+        const descripcion = fila[COL_ACTIVIDAD_MASIVO.descripcion] ? String(fila[COL_ACTIVIDAD_MASIVO.descripcion]).trim() : '';
+        if (!descripcion) { if (Object.values(fila).some(v => v)) sinNombre.push(JSON.stringify(fila)); continue; }
+        const area = fila[COL_ACTIVIDAD_MASIVO.area] ? String(fila[COL_ACTIVIDAD_MASIVO.area]).trim() : null;
+        const edt = fila[COL_ACTIVIDAD_MASIVO.edt] ? String(fila[COL_ACTIVIDAD_MASIVO.edt]).trim() : null;
+        const unidad = fila[COL_ACTIVIDAD_MASIVO.unidad] ? String(fila[COL_ACTIVIDAD_MASIVO.unidad]).trim() : null;
+        const cantidad = fila[COL_ACTIVIDAD_MASIVO.cantidad] !== null && fila[COL_ACTIVIDAD_MASIVO.cantidad] !== '' ? Number(fila[COL_ACTIVIDAD_MASIVO.cantidad]) : null;
+        const hh = fila[COL_ACTIVIDAD_MASIVO.hh] !== null && fila[COL_ACTIVIDAD_MASIVO.hh] !== '' ? Number(fila[COL_ACTIVIDAD_MASIVO.hh]) : null;
+
+        const idExistente = edt ? existentesPorEdt.get(edt.toUpperCase()) : null;
+        if (idExistente) {
+          await tsql('UPDATE pyc_actividades SET area = ?, descripcion = ?, unidad = ?, cantidad_contractual = ?, hh_estimadas = ? WHERE id = ?',
+            [area, descripcion, unidad, cantidad, hh, idExistente]);
+          actualizados++;
+        } else {
+          await tsql('INSERT INTO pyc_actividades (empresa_id, area, edt, descripcion, unidad, cantidad_contractual, hh_estimadas) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [req.params.id, area, edt, descripcion, unidad, cantidad, hh]);
+          creados++;
+        }
+      }
+    });
+
+    res.status(201).json({ creados, actualizados, sinNombre: sinNombre.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---- Reportes diarios ----
 
 // GET /api/pyc/empresas/:id/reportes?desde=&hasta=  — listado, mas reciente primero
@@ -387,18 +533,25 @@ router.get('/reportes/:id', autenticar, autorizar('admin', 'bodeguero', 'visor',
       [req.params.id]
     )).rows;
     const fotos = (await sql('SELECT * FROM pyc_fotos WHERE reporte_id = ? ORDER BY id', [req.params.id])).rows;
+    const actividades = (await sql(
+      `SELECT av.*, act.descripcion AS actividad_descripcion, act.unidad, act.cantidad_contractual
+       FROM pyc_avance_actividades av JOIN pyc_actividades act ON act.id = av.actividad_id
+       WHERE av.reporte_id = ? ORDER BY act.area, act.edt, act.descripcion`,
+      [req.params.id]
+    )).rows;
 
-    res.json({ ...reporte, asistencia, equipos, fotos });
+    res.json({ ...reporte, asistencia, equipos, actividades, fotos });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // POST /api/pyc/empresas/:id/reportes — crea el reporte diario completo de una vez.
 // body: { fecha, frente_destino, observaciones_ssoma, observaciones_generales,
-//         asistencia: [{personal_id, estado, hh}], equipos: [{equipo_id, disponible, hh_operativas, observaciones}] }
+//         asistencia: [{personal_id, estado, hh}], equipos: [{equipo_id, disponible, hh_operativas, observaciones}],
+//         actividades: [{actividad_id, cantidad_real, hh_ganadas, comentario}] }
 router.post('/empresas/:id/reportes', autenticar, autorizar('admin', 'bodeguero', 'contratista'), async (req, res) => {
   try {
     if (!empresaPermitida(req, req.params.id)) return res.status(403).json({ error: 'Sin permisos para esta empresa' });
-    const { fecha, frente_destino, observaciones_ssoma, observaciones_generales, asistencia, equipos } = req.body;
+    const { fecha, frente_destino, observaciones_ssoma, observaciones_generales, asistencia, equipos, actividades } = req.body;
     if (!fecha) return res.status(400).json({ error: 'La fecha es requerida' });
 
     const existe = (await sql('SELECT id FROM pyc_reportes_diarios WHERE empresa_id = ? AND fecha = ?', [req.params.id, fecha])).rows[0];
@@ -406,7 +559,7 @@ router.post('/empresas/:id/reportes', autenticar, autorizar('admin', 'bodeguero'
 
     const reporteId = await withTransaction((tsql) => crearReporteDiario(tsql, {
       empresaId: req.params.id, fecha, frenteDestino: frente_destino, observacionesSsoma: observaciones_ssoma,
-      observacionesGenerales: observaciones_generales, creadoPor: req.usuario.id, asistencia, equipos
+      observacionesGenerales: observaciones_generales, creadoPor: req.usuario.id, asistencia, equipos, actividades
     }));
 
     res.status(201).json({ id: reporteId });
@@ -423,6 +576,11 @@ router.get('/empresas/:id/reportes/plantilla', autenticar, autorizar('admin', 'b
 
     const personal = (await sql('SELECT * FROM pyc_personal WHERE empresa_id = ? AND activo = true ORDER BY tipo, nombre', [req.params.id])).rows;
     const equipos = (await sql('SELECT * FROM pyc_equipos WHERE empresa_id = ? AND activo = true ORDER BY nombre', [req.params.id])).rows;
+    const actividades = (await sql(
+      `SELECT a.*, COALESCE((SELECT SUM(av.cantidad_real) FROM pyc_avance_actividades av WHERE av.actividad_id = a.id), 0) AS avance_acumulado
+       FROM pyc_actividades a WHERE a.empresa_id = ? AND a.activo = true ORDER BY a.area, a.edt, a.descripcion`,
+      [req.params.id]
+    )).rows;
 
     const filasPersonal = personal.map(p => ({
       [COL_PERSONAL.id]: p.id, [COL_PERSONAL.nombre]: p.nombre, [COL_PERSONAL.rut]: p.rut || '',
@@ -439,18 +597,28 @@ router.get('/empresas/:id/reportes/plantilla', autenticar, autorizar('admin', 'b
     const wsEquipos = hojaConEncabezado(COL_EQUIPO, filasEquipos);
     wsEquipos['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 30 }];
 
+    const filasActividades = actividades.map(a => ({
+      [COL_ACTIVIDAD.id]: a.id, [COL_ACTIVIDAD.descripcion]: a.descripcion, [COL_ACTIVIDAD.unidad]: a.unidad || '',
+      [COL_ACTIVIDAD.avanceAcumPrevio]: Number(a.avance_acumulado), [COL_ACTIVIDAD.cantidadContractual]: a.cantidad_contractual ?? '',
+      [COL_ACTIVIDAD.cantidadReal]: 0, [COL_ACTIVIDAD.hh]: 0, [COL_ACTIVIDAD.comentario]: ''
+    }));
+    const wsActividades = hojaConEncabezado(COL_ACTIVIDAD, filasActividades);
+    wsActividades['!cols'] = [{ wch: 6 }, { wch: 45 }, { wch: 10 }, { wch: 22 }, { wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 30 }];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, wsPersonal, 'Personal');
     XLSX.utils.book_append_sheet(wb, wsEquipos, 'Equipos');
+    XLSX.utils.book_append_sheet(wb, wsActividades, 'Actividades');
 
     const instrucciones = XLSX.utils.aoa_to_sheet([
       ['Cómo usar esta plantilla'],
-      ['1. No modificar la columna ID — es la que el sistema usa para identificar a cada persona/equipo al volver a cargar el archivo.'],
+      ['1. No modificar la columna ID — es la que el sistema usa para identificar a cada persona/equipo/actividad al volver a cargar el archivo.'],
       ['2. En la hoja Personal, marcar el ESTADO real del día de cada persona y sus HH trabajadas (ya viene marcado "presente" con 12 HH por defecto, solo cambiar las excepciones).'],
       ['3. Estados válidos: presente, descanso, licencia, permiso, falta (no distingue mayúsculas/tildes).'],
       ['4. En la hoja Equipos, marcar DISPONIBLE (SI/NO) y las HH OPERATIVAS de cada equipo.'],
-      ['5. No agregar ni quitar filas — si falta alguien en la nómina o un equipo en el catálogo, agrégalo antes en el sistema (pestañas Personal / Equipos) y vuelve a descargar la plantilla.'],
-      ['6. Subir este mismo archivo en P&C > Cargar Reporte Diario (Excel), indicando la fecha del día.'],
+      ['5. En la hoja Actividades, AVANCE ACUM. ANTES DE HOY es solo de referencia (lo que ya se llevaba avanzado) — llenar CANTIDAD AVANZADA HOY y HH GANADAS HOY solo en las actividades que tuvieron avance este día, dejar en 0 las que no.'],
+      ['6. No agregar ni quitar filas — si falta alguien en la nómina, un equipo o una actividad, agrégalo antes en el sistema (pestañas Personal / Equipos / Actividades) y vuelve a descargar la plantilla.'],
+      ['7. Subir este mismo archivo en P&C > Cargar Reporte Diario (Excel), indicando la fecha del día.'],
     ]);
     instrucciones['!cols'] = [{ wch: 110 }];
     XLSX.utils.book_append_sheet(wb, instrucciones, 'Instrucciones');
@@ -476,14 +644,17 @@ router.post('/empresas/:id/reportes/importar', autenticar, autorizar('admin', 'b
 
     const idsPersonal = new Set((await sql('SELECT id FROM pyc_personal WHERE empresa_id = ?', [req.params.id])).rows.map(r => r.id));
     const idsEquipos = new Set((await sql('SELECT id FROM pyc_equipos WHERE empresa_id = ?', [req.params.id])).rows.map(r => r.id));
+    const idsActividades = new Set((await sql('SELECT id FROM pyc_actividades WHERE empresa_id = ?', [req.params.id])).rows.map(r => r.id));
 
     const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
     const wsPersonal = wb.Sheets['Personal'];
     const wsEquipos = wb.Sheets['Equipos'];
+    const wsActividades = wb.Sheets['Actividades'];
     if (!wsPersonal || !wsEquipos) return res.status(400).json({ error: 'El archivo no tiene el formato esperado (hojas "Personal" y "Equipos") — descarga la plantilla desde este mismo módulo.' });
 
     const filasPersonal = XLSX.utils.sheet_to_json(wsPersonal, { defval: null });
     const filasEquipos = XLSX.utils.sheet_to_json(wsEquipos, { defval: null });
+    const filasActividades = wsActividades ? XLSX.utils.sheet_to_json(wsActividades, { defval: null }) : [];
 
     const asistencia = [];
     const estadosInvalidos = [];
@@ -513,16 +684,31 @@ router.post('/empresas/:id/reportes/importar', autenticar, autorizar('admin', 'b
       });
     }
 
+    const actividades = [];
+    const idsActividadesDesconocidas = [];
+    for (const fila of filasActividades) {
+      const id = Number(fila[COL_ACTIVIDAD.id]);
+      if (!id) continue;
+      if (!idsActividades.has(id)) { idsActividadesDesconocidas.push(id); continue; }
+      const cantidadReal = Number(fila[COL_ACTIVIDAD.cantidadReal]) || 0;
+      const hhGanadas = Number(fila[COL_ACTIVIDAD.hh]) || 0;
+      if (cantidadReal === 0 && hhGanadas === 0) continue; // sin avance ese dia, no vale la pena guardar la fila
+      actividades.push({
+        actividad_id: id, cantidad_real: cantidadReal, hh_ganadas: hhGanadas,
+        comentario: fila[COL_ACTIVIDAD.comentario] ? String(fila[COL_ACTIVIDAD.comentario]).trim() : null
+      });
+    }
+
     if (asistencia.length === 0) return res.status(400).json({ error: 'La hoja Personal no tiene filas válidas para cargar' });
 
     const reporteId = await withTransaction((tsql) => crearReporteDiario(tsql, {
       empresaId: req.params.id, fecha, frenteDestino: frente_destino, observacionesSsoma: observaciones_ssoma,
-      observacionesGenerales: observaciones_generales, creadoPor: req.usuario.id, asistencia, equipos
+      observacionesGenerales: observaciones_generales, creadoPor: req.usuario.id, asistencia, equipos, actividades
     }));
 
     res.status(201).json({
-      id: reporteId, personalCargado: asistencia.length, equiposCargados: equipos.length,
-      estadosInvalidos, idsPersonalDesconocidos, idsEquiposDesconocidos
+      id: reporteId, personalCargado: asistencia.length, equiposCargados: equipos.length, actividadesCargadas: actividades.length,
+      estadosInvalidos, idsPersonalDesconocidos, idsEquiposDesconocidos, idsActividadesDesconocidas
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -535,7 +721,7 @@ router.put('/reportes/:id', autenticar, autorizar('admin', 'bodeguero', 'contrat
     if (!reporte) return res.status(404).json({ error: 'Reporte no encontrado' });
     if (!empresaPermitida(req, reporte.empresa_id)) return res.status(403).json({ error: 'Sin permisos para esta empresa' });
 
-    const { frente_destino, observaciones_ssoma, observaciones_generales, asistencia, equipos } = req.body;
+    const { frente_destino, observaciones_ssoma, observaciones_generales, asistencia, equipos, actividades } = req.body;
     await withTransaction(async (tsql) => {
       await tsql('UPDATE pyc_reportes_diarios SET frente_destino = ?, observaciones_ssoma = ?, observaciones_generales = ? WHERE id = ?',
         [frente_destino ?? reporte.frente_destino, observaciones_ssoma ?? reporte.observaciones_ssoma,
@@ -553,6 +739,16 @@ router.put('/reportes/:id', autenticar, autorizar('admin', 'bodeguero', 'contrat
         if (!e.equipo_id) continue;
         await tsql('INSERT INTO pyc_uso_equipos (reporte_id, equipo_id, disponible, hh_operativas, observaciones) VALUES (?, ?, ?, ?, ?)',
           [req.params.id, e.equipo_id, e.disponible !== false, Number(e.hh_operativas) || 0, e.observaciones || null]);
+      }
+
+      await tsql('DELETE FROM pyc_avance_actividades WHERE reporte_id = ?', [req.params.id]);
+      for (const a of actividades || []) {
+        if (!a.actividad_id) continue;
+        const cantidad = Number(a.cantidad_real) || 0;
+        const hh = Number(a.hh_ganadas) || 0;
+        if (cantidad === 0 && hh === 0 && !a.comentario) continue;
+        await tsql('INSERT INTO pyc_avance_actividades (reporte_id, actividad_id, cantidad_real, hh_ganadas, comentario) VALUES (?, ?, ?, ?, ?)',
+          [req.params.id, a.actividad_id, cantidad, hh, a.comentario || null]);
       }
     });
     res.json({ ok: true });

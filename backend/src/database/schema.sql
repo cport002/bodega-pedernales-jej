@@ -376,3 +376,31 @@ CREATE TABLE IF NOT EXISTS pyc_fotos (
   url TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Fase 2 del modulo P&C: catalogo de actividades/EDT del programa contractual (la cantidad total
+-- comprometida de cada una) y su avance diario, para poder calcular el % de avance fisico acumulado
+-- por actividad. La curva de avance programado-vs-real (que necesita ademas un programa BASE por
+-- semana) y el SPI quedan para una siguiente etapa, una vez validado este primer nivel.
+CREATE TABLE IF NOT EXISTS pyc_actividades (
+  id SERIAL PRIMARY KEY,
+  empresa_id INTEGER NOT NULL REFERENCES pyc_empresas(id),
+  area TEXT,
+  edt TEXT,
+  descripcion TEXT NOT NULL,
+  unidad TEXT,
+  cantidad_contractual NUMERIC,
+  hh_estimadas NUMERIC,
+  activo BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pyc_actividades_empresa ON pyc_actividades(empresa_id);
+
+CREATE TABLE IF NOT EXISTS pyc_avance_actividades (
+  id SERIAL PRIMARY KEY,
+  reporte_id INTEGER NOT NULL REFERENCES pyc_reportes_diarios(id) ON DELETE CASCADE,
+  actividad_id INTEGER NOT NULL REFERENCES pyc_actividades(id),
+  cantidad_real NUMERIC NOT NULL DEFAULT 0,
+  hh_ganadas NUMERIC NOT NULL DEFAULT 0,
+  comentario TEXT,
+  UNIQUE(reporte_id, actividad_id)
+);

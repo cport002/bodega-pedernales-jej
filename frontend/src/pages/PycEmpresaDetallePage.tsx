@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import api, { fmt } from '../services/api'
-import type { PycEmpresa, PycPersonal, PycEquipo, PycReporteDiario } from '../types'
+import type { PycEmpresa, PycPersonal, PycEquipo, PycActividad, PycReporteDiario } from '../types'
 import { useAuth } from '../hooks/useAuth'
-import { Building2, Plus, Users, Truck, CalendarDays, X, FileText, Download, Upload } from 'lucide-react'
+import { Building2, Plus, Users, Truck, CalendarDays, ListChecks, X, FileText, Download, Upload } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import toast from 'react-hot-toast'
 
-type Tab = 'reportes' | 'personal' | 'equipos'
+type Tab = 'reportes' | 'personal' | 'equipos' | 'actividades'
 
 export default function PycEmpresaDetallePage() {
   const { empresaId } = useParams()
@@ -15,6 +15,7 @@ export default function PycEmpresaDetallePage() {
   const [empresa, setEmpresa] = useState<PycEmpresa | null>(null)
   const [personal, setPersonal] = useState<PycPersonal[]>([])
   const [equipos, setEquipos] = useState<PycEquipo[]>([])
+  const [actividades, setActividades] = useState<PycActividad[]>([])
   const [reportes, setReportes] = useState<PycReporteDiario[]>([])
   const [tab, setTab] = useState<Tab>('reportes')
   const [desde, setDesde] = useState('')
@@ -23,6 +24,7 @@ export default function PycEmpresaDetallePage() {
   const cargarEmpresa = () => api.get('/pyc/empresas').then(r => setEmpresa(r.data.find((e: PycEmpresa) => String(e.id) === empresaId) || r.data[0] || null)).catch(() => {})
   const cargarPersonal = () => api.get(`/pyc/empresas/${empresaId}/personal`).then(r => setPersonal(r.data)).catch(() => {})
   const cargarEquipos = () => api.get(`/pyc/empresas/${empresaId}/equipos`).then(r => setEquipos(r.data)).catch(() => {})
+  const cargarActividades = () => api.get(`/pyc/empresas/${empresaId}/actividades`).then(r => setActividades(r.data)).catch(() => {})
   const cargarReportes = () => {
     const params: Record<string, string> = {}
     if (desde) params.desde = desde
@@ -30,7 +32,7 @@ export default function PycEmpresaDetallePage() {
     api.get(`/pyc/empresas/${empresaId}/reportes`, { params }).then(r => setReportes(r.data)).catch(() => {})
   }
 
-  useEffect(() => { cargarEmpresa(); cargarPersonal(); cargarEquipos() }, [empresaId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { cargarEmpresa(); cargarPersonal(); cargarEquipos(); cargarActividades() }, [empresaId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { cargarReportes() }, [empresaId, desde, hasta]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const puedeGestionar = puedeOperar || esContratista
@@ -52,6 +54,7 @@ export default function PycEmpresaDetallePage() {
           { id: 'reportes', label: 'Reportes Diarios', icon: CalendarDays },
           { id: 'personal', label: `Personal (${personal.length})`, icon: Users },
           { id: 'equipos', label: `Equipos (${equipos.length})`, icon: Truck },
+          { id: 'actividades', label: `Actividades (${actividades.length})`, icon: ListChecks },
         ] as { id: Tab; label: string; icon: typeof Users }[]).map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors
@@ -115,6 +118,10 @@ export default function PycEmpresaDetallePage() {
 
       {tab === 'equipos' && (
         <EquiposTab empresaId={empresaId!} equipos={equipos} puedeGestionar={puedeGestionar} onCambio={cargarEquipos} />
+      )}
+
+      {tab === 'actividades' && (
+        <ActividadesTab empresaId={empresaId!} actividades={actividades} puedeGestionar={puedeGestionar} onCambio={cargarActividades} />
       )}
     </div>
   )
@@ -232,14 +239,14 @@ type ResultadoImportarCatalogo = { creados: number; actualizados: number; sinNom
 // Carga masiva por Excel para un catalogo (personal o equipos) de la empresa: descarga la lista
 // actual, se agregan filas nuevas (o se corrigen las existentes) y se vuelve a subir — hace upsert
 // por RUT/PATENTE en vez de crear IDs nuevos cada vez, asi no duplica a quien ya estaba cargado.
-function ImportarCatalogoCard({ empresaId, tipo, onImportado }: { empresaId: string; tipo: 'personal' | 'equipos'; onImportado: () => void }) {
+function ImportarCatalogoCard({ empresaId, tipo, onImportado }: { empresaId: string; tipo: 'personal' | 'equipos' | 'actividades'; onImportado: () => void }) {
   const [descargando, setDescargando] = useState(false)
   const [archivo, setArchivo] = useState<File | null>(null)
   const [cargando, setCargando] = useState(false)
   const [resultado, setResultado] = useState<ResultadoImportarCatalogo | null>(null)
 
-  const label = tipo === 'personal' ? 'Personal' : 'Equipos'
-  const claveLabel = tipo === 'personal' ? 'RUT' : 'PATENTE'
+  const label = tipo === 'personal' ? 'Personal' : tipo === 'equipos' ? 'Equipos' : 'Actividades'
+  const claveLabel = tipo === 'personal' ? 'RUT' : tipo === 'equipos' ? 'PATENTE' : 'EDT'
 
   const descargarPlantilla = async () => {
     setDescargando(true)
@@ -285,7 +292,7 @@ function ImportarCatalogoCard({ empresaId, tipo, onImportado }: { empresaId: str
         </button>
       </div>
       <p className="text-xs text-gray-500">
-        Descarga {label.toLowerCase()} ya cargado, agrega filas nuevas abajo (o corrige las existentes) y vuelve a subirlo — si el {claveLabel} de una fila ya existe, se actualiza en vez de duplicarse.
+        Descarga lo que ya está cargado en {label.toLowerCase()}, agrega filas nuevas abajo (o corrige las existentes) y vuelve a subirlo — si el {claveLabel} de una fila ya existe, se actualiza en vez de duplicarse.
       </p>
       <form onSubmit={importar} className="flex flex-wrap items-end gap-4">
         <div className="min-w-[240px]">
@@ -496,6 +503,133 @@ function EquiposTab({ empresaId, equipos, puedeGestionar, onCambio }: { empresaI
               <div>
                 <label className="label">Área de trabajo</label>
                 <input className="input" value={form.area_trabajo} onChange={e => setForm({ ...form, area_trabajo: e.target.value })} />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancelar</button>
+                <button type="submit" className="btn-primary">Agregar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BarraAvance({ pct }: { pct: number | null | undefined }) {
+  if (pct === null || pct === undefined) return <span className="text-gray-400 text-xs">Sin cantidad contractual</span>
+  const pctClamp = Math.max(0, Math.min(1, pct))
+  const color = pct >= 1 ? 'bg-green-500' : pct >= 0.7 ? 'bg-primary-500' : pct >= 0.4 ? 'bg-amber-500' : 'bg-red-400'
+  return (
+    <div className="flex items-center gap-2 min-w-[140px]">
+      <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
+        <div className={`h-full ${color}`} style={{ width: `${pctClamp * 100}%` }} />
+      </div>
+      <span className="text-xs font-semibold text-gray-700 tabular-nums w-12 text-right">{fmt.num(pct * 100, 1)}%</span>
+    </div>
+  )
+}
+
+function ActividadesTab({ empresaId, actividades, puedeGestionar, onCambio }: { empresaId: string; actividades: PycActividad[]; puedeGestionar: boolean; onCambio: () => void }) {
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ area: '', edt: '', descripcion: '', unidad: '', cantidad_contractual: '', hh_estimadas: '' })
+
+  const agregar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      await api.post(`/pyc/empresas/${empresaId}/actividades`, {
+        ...form,
+        cantidad_contractual: form.cantidad_contractual ? Number(form.cantidad_contractual) : null,
+        hh_estimadas: form.hh_estimadas ? Number(form.hh_estimadas) : null,
+      })
+      toast.success('Actividad agregada')
+      setForm({ area: '', edt: '', descripcion: '', unidad: '', cantidad_contractual: '', hh_estimadas: '' })
+      setShowForm(false)
+      onCambio()
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Error al agregar') }
+  }
+
+  const cambiarActivo = async (a: PycActividad) => {
+    try { await api.put(`/pyc/actividades/${a.id}`, { activo: !a.activo }); onCambio() } catch { toast.error('Error al actualizar') }
+  }
+
+  return (
+    <div className="space-y-4">
+      {puedeGestionar && <ImportarCatalogoCard empresaId={empresaId} tipo="actividades" onImportado={onCambio} />}
+      {puedeGestionar && (
+        <div className="flex justify-end">
+          <button onClick={() => setShowForm(true)} className="btn-secondary flex items-center gap-2"><Plus className="w-4 h-4" /> Agregar Actividad</button>
+        </div>
+      )}
+      <div className="card p-0 overflow-hidden overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th className="table-header">Área / EDT</th>
+              <th className="table-header">Descripción</th>
+              <th className="table-header text-right">Contractual</th>
+              <th className="table-header text-right">Avance</th>
+              <th className="table-header">% Avance físico</th>
+              {puedeGestionar && <th className="table-header text-center">Activo</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {actividades.map(a => (
+              <tr key={a.id} className={`table-row ${!a.activo ? 'opacity-50' : ''}`}>
+                <td className="table-cell text-gray-500">{[a.area, a.edt].filter(Boolean).join(' · ') || '-'}</td>
+                <td className="table-cell font-medium">{a.descripcion}</td>
+                <td className="table-cell text-right tabular-nums">{a.cantidad_contractual != null ? `${fmt.num(a.cantidad_contractual)} ${a.unidad || ''}` : '-'}</td>
+                <td className="table-cell text-right tabular-nums">{fmt.num(a.avance_acumulado || 0)} {a.unidad || ''}</td>
+                <td className="table-cell"><BarraAvance pct={a.porcentaje_avance} /></td>
+                {puedeGestionar && (
+                  <td className="table-cell text-center">
+                    <button onClick={() => cambiarActivo(a)} className={a.activo ? 'badge-green' : 'badge-gray'}>{a.activo ? 'Sí' : 'No'}</button>
+                  </td>
+                )}
+              </tr>
+            ))}
+            {actividades.length === 0 && (
+              <tr><td colSpan={6} className="table-cell text-center text-gray-400 py-8">Sin actividades registradas todavía</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {showForm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+              <h2>Agregar Actividad</h2>
+              <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={agregar} className="p-6 space-y-4">
+              <div>
+                <label className="label">Descripción *</label>
+                <input className="input" value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} required />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Área</label>
+                  <input className="input" value={form.area} onChange={e => setForm({ ...form, area: e.target.value })} />
+                </div>
+                <div>
+                  <label className="label">EDT / Ítem</label>
+                  <input className="input" value={form.edt} onChange={e => setForm({ ...form, edt: e.target.value })} />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="label">Unidad</label>
+                  <input className="input" placeholder="m2, ml, un..." value={form.unidad} onChange={e => setForm({ ...form, unidad: e.target.value })} />
+                </div>
+                <div>
+                  <label className="label">Cant. contractual</label>
+                  <input type="number" min={0} step="0.01" className="input" value={form.cantidad_contractual} onChange={e => setForm({ ...form, cantidad_contractual: e.target.value })} />
+                </div>
+                <div>
+                  <label className="label">HH estimadas</label>
+                  <input type="number" min={0} step="0.01" className="input" value={form.hh_estimadas} onChange={e => setForm({ ...form, hh_estimadas: e.target.value })} />
+                </div>
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancelar</button>

@@ -112,6 +112,32 @@ export default function PycReporteDetallePage() {
         </table>
       </div>
 
+      {reporte.actividades && reporte.actividades.length > 0 && (
+        <div className="card p-0 overflow-hidden overflow-x-auto">
+          <div className="p-4 border-b border-gray-100"><h3>Avance de Actividades</h3></div>
+          <table className="w-full">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="table-header">Actividad</th>
+                <th className="table-header text-right">Avanzado ese día</th>
+                <th className="table-header text-right">HH ganadas</th>
+                <th className="table-header">Comentario</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reporte.actividades.map(a => (
+                <tr key={a.actividad_id} className="table-row">
+                  <td className="table-cell font-medium">{a.actividad_descripcion}</td>
+                  <td className="table-cell text-right tabular-nums">{fmt.num(a.cantidad_real)} {a.unidad || ''}</td>
+                  <td className="table-cell text-right tabular-nums">{fmt.num(a.hh_ganadas)}</td>
+                  <td className="table-cell">{a.comentario || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {(reporte.observaciones_ssoma || reporte.observaciones_generales) && (
         <div className="card grid grid-cols-1 md:grid-cols-2 gap-4">
           {reporte.observaciones_ssoma && (

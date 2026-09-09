@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import api from '../services/api'
-import type { PycPersonal, PycEquipo, PycAsistencia, PycUsoEquipo, PycEstadoAsistencia } from '../types'
+import api, { fmt } from '../services/api'
+import type { PycPersonal, PycEquipo, PycActividad, PycAsistencia, PycUsoEquipo, PycAvanceActividad, PycEstadoAsistencia } from '../types'
 import { CalendarCheck2 } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import toast from 'react-hot-toast'
@@ -25,21 +25,26 @@ export default function PycReporteFormPage() {
   const [obsGenerales, setObsGenerales] = useState('')
   const [asistencia, setAsistencia] = useState<Record<number, PycAsistencia>>({})
   const [equiposUso, setEquiposUso] = useState<Record<number, PycUsoEquipo>>({})
+  const [avanceActividades, setAvanceActividades] = useState<Record<number, PycAvanceActividad>>({})
   const [personalRoster, setPersonalRoster] = useState<PycPersonal[]>([])
   const [equiposRoster, setEquiposRoster] = useState<PycEquipo[]>([])
+  const [actividadesRoster, setActividadesRoster] = useState<PycActividad[]>([])
   const [cargando, setCargando] = useState(true)
   const [guardando, setGuardando] = useState(false)
 
   useEffect(() => {
     const cargar = async () => {
-      const [rPersonal, rEquipos] = await Promise.all([
+      const [rPersonal, rEquipos, rActividades] = await Promise.all([
         api.get(`/pyc/empresas/${empresaId}/personal`),
         api.get(`/pyc/empresas/${empresaId}/equipos`),
+        api.get(`/pyc/empresas/${empresaId}/actividades`),
       ])
       const personal: PycPersonal[] = rPersonal.data.filter((p: PycPersonal) => p.activo)
       const equipos: PycEquipo[] = rEquipos.data.filter((e: PycEquipo) => e.activo)
+      const actividades: PycActividad[] = rActividades.data.filter((a: PycActividad) => a.activo)
       setPersonalRoster(personal)
       setEquiposRoster(equipos)
+      setActividadesRoster(actividades)
 
       if (editando) {
         const r = await api.get(`/pyc/reportes/${reporteId}`)
@@ -56,6 +61,10 @@ export default function PycReporteFormPage() {
         for (const e of equipos) eq[e.id] = { equipo_id: e.id, disponible: true, hh_operativas: 0 }
         for (const u of rep.equipos || []) eq[u.equipo_id] = { equipo_id: u.equipo_id, disponible: u.disponible, hh_operativas: u.hh_operativas, observaciones: u.observaciones }
         setEquiposUso(eq)
+        const av: Record<number, PycAvanceActividad> = {}
+        for (const a of actividades) av[a.id] = { actividad_id: a.id, cantidad_real: 0, hh_ganadas: 0, comentario: '' }
+        for (const a of rep.actividades || []) av[a.actividad_id] = { actividad_id: a.actividad_id, cantidad_real: a.cantidad_real, hh_ganadas: a.hh_ganadas, comentario: a.comentario || '' }
+        setAvanceActividades(av)
       } else {
         const asis: Record<number, PycAsistencia> = {}
         for (const p of personal) asis[p.id] = { personal_id: p.id, estado: 'presente', hh: 12 }
@@ -63,6 +72,9 @@ export default function PycReporteFormPage() {
         const eq: Record<number, PycUsoEquipo> = {}
         for (const e of equipos) eq[e.id] = { equipo_id: e.id, disponible: true, hh_operativas: 0 }
         setEquiposUso(eq)
+        const av: Record<number, PycAvanceActividad> = {}
+        for (const a of actividades) av[a.id] = { actividad_id: a.id, cantidad_real: 0, hh_ganadas: 0, comentario: '' }
+        setAvanceActividades(av)
       }
       setCargando(false)
     }
@@ -84,6 +96,15 @@ export default function PycReporteFormPage() {
   const setObsEquipo = (equipoId: number, observaciones: string) => {
     setEquiposUso(prev => ({ ...prev, [equipoId]: { ...prev[equipoId], observaciones } }))
   }
+  const setCantidadActividad = (actividadId: number, cantidad_real: string) => {
+    setAvanceActividades(prev => ({ ...prev, [actividadId]: { ...prev[actividadId], cantidad_real: Number(cantidad_real) || 0 } }))
+  }
+  const setHHActividad = (actividadId: number, hh_ganadas: string) => {
+    setAvanceActividades(prev => ({ ...prev, [actividadId]: { ...prev[actividadId], hh_ganadas: Number(hh_ganadas) || 0 } }))
+  }
+  const setComentarioActividad = (actividadId: number, comentario: string) => {
+    setAvanceActividades(prev => ({ ...prev, [actividadId]: { ...prev[actividadId], comentario } }))
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -95,6 +116,7 @@ export default function PycReporteFormPage() {
       observaciones_generales: obsGenerales || null,
       asistencia: Object.values(asistencia),
       equipos: Object.values(equiposUso),
+      actividades: Object.values(avanceActividades),
     }
     try {
       if (editando) {
@@ -203,6 +225,43 @@ export default function PycReporteFormPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {actividadesRoster.length > 0 && (
+          <div className="card p-0 overflow-hidden overflow-x-auto">
+            <div className="p-4 border-b border-gray-100"><h3>Avance de Actividades</h3></div>
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="table-header">Actividad</th>
+                  <th className="table-header text-right">Contractual</th>
+                  <th className="table-header text-right w-32">Avanzado hoy</th>
+                  <th className="table-header text-right w-28">HH ganadas</th>
+                  <th className="table-header">Comentario</th>
+                </tr>
+              </thead>
+              <tbody>
+                {actividadesRoster.map(act => (
+                  <tr key={act.id} className="table-row">
+                    <td className="table-cell font-medium">{act.descripcion}</td>
+                    <td className="table-cell text-right tabular-nums text-gray-500">{act.cantidad_contractual != null ? `${fmt.num(act.cantidad_contractual)} ${act.unidad || ''}` : '-'}</td>
+                    <td className="table-cell text-right">
+                      <input type="number" min={0} step="0.01" className="input text-right"
+                        value={avanceActividades[act.id]?.cantidad_real ?? 0} onChange={e => setCantidadActividad(act.id, e.target.value)} />
+                    </td>
+                    <td className="table-cell text-right">
+                      <input type="number" min={0} step="0.5" className="input text-right"
+                        value={avanceActividades[act.id]?.hh_ganadas ?? 0} onChange={e => setHHActividad(act.id, e.target.value)} />
+                    </td>
+                    <td className="table-cell">
+                      <input className="input" value={avanceActividades[act.id]?.comentario || ''} onChange={e => setComentarioActividad(act.id, e.target.value)} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-xs text-gray-500 px-4 py-3 border-t border-gray-100">Deja en 0 las actividades sin avance este día — no es necesario tocarlas todas.</p>
           </div>
         )}
 
